@@ -82,6 +82,24 @@ async function verifyViewport(browser, viewport) {
 			? await createTouchInput(page)
 			: createMouseInput(page);
 
+		const feedbackPoint = {
+			x: viewport.width / 2,
+			y: viewport.height * 0.83
+		};
+		const beforeFeedbackSignature = await canvasSignature(page);
+		// Same-point press/hold: thumb marker and tether stay skipped, only the start anchor pulse should render.
+		await input.startDrag(feedbackPoint.x, feedbackPoint.y, feedbackPoint.x, feedbackPoint.y);
+		await page.waitForTimeout(120);
+		const pressFeedbackSignature = await canvasSignature(page);
+		await page.waitForTimeout(90);
+		await input.endDrag();
+		await waitForBodyText(page, 'Idle');
+		assert.notEqual(
+			pressFeedbackSignature,
+			beforeFeedbackSignature,
+			`${viewport.name} press feedback should alter the canvas before movement`
+		);
+
 		await input.tap(center.x, center.y);
 		await waitForBodyText(page, 'Attack 1');
 
@@ -289,6 +307,51 @@ async function hasNonBlankCanvas(page) {
 		}
 
 		return false;
+	});
+}
+
+async function canvasSignature(page) {
+	return page.locator('canvas').first().evaluate((canvas) => {
+		if (!(canvas instanceof HTMLCanvasElement)) return '';
+
+		const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+		if (!gl) return '';
+
+		const width = gl.drawingBufferWidth;
+		const height = gl.drawingBufferHeight;
+		if (width <= 0 || height <= 0) return '';
+
+		const stride = 16;
+		let hash = 2166136261;
+
+		for (let y = 0; y < height; y += stride) {
+			for (let x = 0; x < width; x += stride) {
+				const pixel = new Uint8Array(4);
+				gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+				hash ^= pixel[0];
+				hash = Math.imul(hash, 16777619);
+				hash ^= pixel[1];
+				hash = Math.imul(hash, 16777619);
+				hash ^= pixel[2];
+				hash = Math.imul(hash, 16777619);
+			}
+		}
+
+		for (const [x, y] of [
+			[width - 1, height - 1],
+			[Math.floor(width / 2), Math.floor(height / 2)]
+		]) {
+			const pixel = new Uint8Array(4);
+			gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+			hash ^= pixel[0];
+			hash = Math.imul(hash, 16777619);
+			hash ^= pixel[1];
+			hash = Math.imul(hash, 16777619);
+			hash ^= pixel[2];
+			hash = Math.imul(hash, 16777619);
+		}
+
+		return `${width}x${height}:${hash >>> 0}`;
 	});
 }
 
