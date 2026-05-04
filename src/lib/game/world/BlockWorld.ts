@@ -51,7 +51,7 @@ export class BlockWorld {
 		}
 	}
 
-	clampPosition(position: THREE.Vector3, margin = 0.35) {
+	clampPosition(position: THREE.Vector3, margin = 0) {
 		position.x = THREE.MathUtils.clamp(
 			position.x,
 			this.bounds.minX + margin,
