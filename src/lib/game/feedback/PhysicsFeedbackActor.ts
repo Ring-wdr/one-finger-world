@@ -109,6 +109,13 @@ export class PhysicsFeedbackActor {
 	}
 
 	handleGesture(gesture: InputGesture, playerWorld: THREE.Vector3) {
+		if (gesture.type === 'move') {
+			if (this.active) {
+				this.runIntensity = gesture.mode === 'run' ? 1 : 0.35;
+			}
+			return;
+		}
+
 		if (gesture.type === 'dash') {
 			this.dashWaveAge = 0;
 			this.placeGroundObject(this.dashWave, playerWorld);

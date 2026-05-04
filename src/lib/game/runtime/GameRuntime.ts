@@ -216,9 +216,7 @@ export class GameRuntime {
 	private readonly handleGesture = (gesture: InputGesture) => {
 		if (this.disposed) return;
 
-		if (this.player) {
-			this.feedback?.handleGesture(gesture, this.player.group.position);
-		}
+		this.emitGestureFeedback(gesture);
 
 		if (gesture.type === 'attack') {
 			this.player?.playAttack(gesture.comboStep);
@@ -263,6 +261,16 @@ export class GameRuntime {
 			this.publishAction(IDLE_ACTION);
 		}
 	};
+
+	private emitGestureFeedback(gesture: InputGesture) {
+		if (!this.player) return;
+
+		try {
+			this.feedback?.handleGesture(gesture, this.player.group.position);
+		} catch {
+			// Visual feedback must not block gameplay gesture handling.
+		}
+	}
 
 	private readonly handleInputFeedback = (event: InputFeedbackEvent) => {
 		if (this.disposed || !this.feedback) return;
