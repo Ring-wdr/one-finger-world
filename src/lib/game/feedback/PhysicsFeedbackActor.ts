@@ -14,6 +14,8 @@ const TETHER_COLOR = 0xe0f2fe;
 const DASH_COLOR = 0x93c5fd;
 const ATTACK_COLOR = 0xfff7ad;
 const GROUND_Y = 0.035;
+const THUMB_SPRING_STIFFNESS = 130;
+const THUMB_SPRING_DAMPING = 19;
 
 export class PhysicsFeedbackActor {
 	readonly group = new THREE.Group();
@@ -80,8 +82,7 @@ export class PhysicsFeedbackActor {
 		if (event.type === 'press') {
 			this.active = true;
 			this.thumbVisible = false;
-			this.runIntensity = 0;
-			this.runVelocity = 0;
+			this.resetRunHalo();
 			this.thumbVisualWorld.copy(thumbWorld);
 			this.thumbVelocity.set(0, 0, 0);
 			this.startAnchor.visible = true;
@@ -111,6 +112,8 @@ export class PhysicsFeedbackActor {
 		if (gesture.type === 'dash') {
 			this.dashWaveAge = 0;
 			this.placeGroundObject(this.dashWave, playerWorld);
+			this.dashWave.scale.setScalar(1);
+			this.dashWave.material.opacity = 0.68;
 			this.dashWave.visible = true;
 			return;
 		}
@@ -118,6 +121,8 @@ export class PhysicsFeedbackActor {
 		if (gesture.type === 'attack') {
 			this.attackPulseAge = 0;
 			this.placeGroundObject(this.attackPulse, playerWorld);
+			this.attackPulse.scale.setScalar(0.8);
+			this.attackPulse.material.opacity = 0.58;
 			this.attackPulse.visible = true;
 		}
 	}
@@ -236,19 +241,28 @@ export class PhysicsFeedbackActor {
 		velocity: THREE.Vector3,
 		deltaSeconds: number
 	) {
-		const stiffness = 130;
-		const damping = 19;
-		velocity.x += ((target.x - current.x) * stiffness - velocity.x * damping) * deltaSeconds;
-		velocity.z += ((target.z - current.z) * stiffness - velocity.z * damping) * deltaSeconds;
+		velocity.x +=
+			((target.x - current.x) * THUMB_SPRING_STIFFNESS - velocity.x * THUMB_SPRING_DAMPING) *
+			deltaSeconds;
+		velocity.z +=
+			((target.z - current.z) * THUMB_SPRING_STIFFNESS - velocity.z * THUMB_SPRING_DAMPING) *
+			deltaSeconds;
 		current.x += velocity.x * deltaSeconds;
 		current.z += velocity.z * deltaSeconds;
 		current.y = GROUND_Y;
 	}
 
+	private resetRunHalo() {
+		this.runIntensity = 0;
+		this.runVelocity = 0;
+		this.runHalo.scale.setScalar(0);
+		this.runHalo.material.opacity = 0;
+		this.runHalo.visible = false;
+	}
+
 	private hideThumbAndTether() {
 		this.thumbTarget.visible = false;
 		this.tether.visible = false;
-		this.runHalo.visible = false;
 	}
 
 	private createGroundRing(name: string, color: number, innerRadius: number, outerRadius: number, opacity: number) {
