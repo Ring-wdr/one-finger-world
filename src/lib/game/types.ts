@@ -7,6 +7,43 @@ export interface Direction2 {
 	y: number;
 }
 
+export interface ScreenPoint {
+	x: number;
+	y: number;
+}
+
+export type InputFeedbackEvent =
+	| {
+			type: 'press';
+			start: ScreenPoint;
+			thumb: ScreenPoint;
+			timeStamp: number;
+	  }
+	| {
+			type: 'drag';
+			start: ScreenPoint;
+			thumb: ScreenPoint;
+			direction: Direction2;
+			mode: MoveMode;
+			timeStamp: number;
+	  }
+	| {
+			type: 'release';
+			start: ScreenPoint;
+			thumb: ScreenPoint;
+			wasDragging: boolean;
+			timeStamp: number;
+	  }
+	| {
+			type: 'cancel';
+			start: ScreenPoint;
+			thumb: ScreenPoint;
+			wasDragging: boolean;
+			timeStamp: number;
+	  };
+
+export type InputFeedbackHandler = (event: InputFeedbackEvent) => void;
+
 export interface ActionState {
 	kind: ActionKind;
 	label: string;
