@@ -5,14 +5,17 @@
 		onActionStateChange,
 		onRuntimeError
 	}: {
-		onActionStateChange?: ActionStateHandler;
-		onRuntimeError?: RuntimeErrorHandler;
+		onActionStateChange: ActionStateHandler;
+		onRuntimeError: RuntimeErrorHandler;
 	} = $props();
+
+	$effect(() => {
+		void onActionStateChange;
+		void onRuntimeError;
+	});
 </script>
 
 <div
 	class="game-canvas"
 	aria-label="3D action prototype play surface"
-	data-action-handler={onActionStateChange ? 'ready' : 'missing'}
-	data-error-handler={onRuntimeError ? 'ready' : 'missing'}
 ></div>
