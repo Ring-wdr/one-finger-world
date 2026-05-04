@@ -1,73 +1,195 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import net from 'node:net';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
-const baseURL = process.env.APP_URL ?? 'http://127.0.0.1:5173';
+const DEFAULT_BASE_URL = 'http://127.0.0.1:5173';
+const SERVER_HOST = '127.0.0.1';
+const SERVER_PORT = 5173;
+const SERVER_READY_TIMEOUT_MS = 30000;
+const SERVER_POLL_INTERVAL_MS = 250;
+const LOCAL_SERVER_ARGS = [
+	'run',
+	'dev',
+	'--',
+	'--host',
+	SERVER_HOST,
+	'--port',
+	String(SERVER_PORT),
+	'--strictPort'
+];
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const baseURL = process.env.APP_URL ?? DEFAULT_BASE_URL;
+const shouldStartServer = process.env.APP_URL === undefined;
+const homePathname = new URL(baseURL).pathname || '/';
 
 const viewports = [
-	{ name: 'mobile', width: 390, height: 844 },
-	{ name: 'desktop', width: 1280, height: 720 }
+	{ name: 'mobile', width: 390, height: 844, touch: true },
+	{ name: 'desktop', width: 1280, height: 720, touch: false }
 ];
 
-const browser = await chromium.launch({ headless: true });
+let serverProcess = null;
+let browser = null;
 
 try {
+	if (shouldStartServer) {
+		serverProcess = await startLocalDevServer();
+	}
+
+	browser = await chromium.launch({ headless: true });
+
 	for (const viewport of viewports) {
 		await verifyViewport(browser, viewport);
 	}
 } finally {
-	await browser.close();
+	try {
+		await browser?.close();
+	} finally {
+		await stopLocalDevServer(serverProcess);
+	}
 }
 
 async function verifyViewport(browser, viewport) {
 	const context = await browser.newContext({
-		viewport: { width: viewport.width, height: viewport.height }
+		viewport: { width: viewport.width, height: viewport.height },
+		hasTouch: viewport.touch,
+		isMobile: viewport.touch,
+		deviceScaleFactor: viewport.touch ? 2 : 1
 	});
 	const page = await context.newPage();
 
 	try {
-		await page.goto(baseURL, { waitUntil: 'networkidle' });
-		await page.getByRole('button', { name: 'Game Start' }).click();
+		await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
+
+		const startButton = page.getByRole('button', { name: 'Game Start' });
+		await startButton.waitFor({ state: 'visible' });
+
+		if (viewport.touch) {
+			await startButton.tap();
+		} else {
+			await startButton.click();
+		}
+
+		await page.waitForURL((url) => new URL(url).pathname === '/play');
 
 		const canvas = page.locator('canvas').first();
 		await canvas.waitFor({ state: 'visible' });
 		await waitForCanvasSize(page);
+		await waitForBodyText(page, 'Idle');
 		await waitForNonBlankCanvas(page, viewport.name);
 
 		const center = {
 			x: viewport.width / 2,
 			y: viewport.height / 2
 		};
+		const input = viewport.touch
+			? await createTouchInput(page)
+			: createMouseInput(page);
 
-		await page.mouse.click(center.x, center.y);
+		await input.tap(center.x, center.y);
 		await waitForBodyText(page, 'Attack 1');
 
-		await slowDrag(page, center.x, center.y, center.x + 44, center.y);
-		await waitForBodyTextMatch(page, /Walk|Run/);
-		await page.waitForTimeout(520);
-		await page.mouse.up();
+		await input.startDrag(center.x, center.y, center.x + 44, center.y);
+		try {
+			await waitForBodyTextMatch(page, /Walk|Run/);
+			await page.waitForTimeout(520);
+		} finally {
+			await input.endDrag();
+		}
 
-		await fastDrag(page, center.x, center.y, center.x + 110, center.y);
-		await fastDrag(page, center.x, center.y, center.x + 110, center.y);
+		await input.fastDrag(center.x, center.y, center.x + 110, center.y);
+		await input.fastDrag(center.x, center.y, center.x + 110, center.y);
 		await waitForBodyText(page, 'Dash');
 
-		await page.goBack({ waitUntil: 'networkidle' });
-		await page.getByRole('button', { name: 'Game Start' }).waitFor({ state: 'visible' });
+		await Promise.all([
+			page.waitForURL((url) => new URL(url).pathname === homePathname),
+			page.goBack()
+		]);
+		await startButton.waitFor({ state: 'visible' });
 	} finally {
 		await context.close();
 	}
 }
 
-async function slowDrag(page, startX, startY, endX, endY) {
-	await page.mouse.move(startX, startY);
-	await page.mouse.down();
-	await page.mouse.move(endX, endY, { steps: 12 });
+function createMouseInput(page) {
+	return {
+		async tap(x, y) {
+			await page.mouse.click(x, y);
+		},
+		async startDrag(startX, startY, endX, endY) {
+			await page.mouse.move(startX, startY);
+			await page.mouse.down();
+			await page.mouse.move(endX, endY, { steps: 12 });
+		},
+		async endDrag() {
+			await page.mouse.up();
+		},
+		async fastDrag(startX, startY, endX, endY) {
+			await page.mouse.move(startX, startY);
+			await page.mouse.down();
+			await page.mouse.move(endX, endY, { steps: 2 });
+			await page.mouse.up();
+		}
+	};
 }
 
-async function fastDrag(page, startX, startY, endX, endY) {
-	await page.mouse.move(startX, startY);
-	await page.mouse.down();
-	await page.mouse.move(endX, endY, { steps: 2 });
-	await page.mouse.up();
+async function createTouchInput(page) {
+	const client = await page.context().newCDPSession(page);
+
+	return {
+		async tap(x, y) {
+			await dispatchTouchStart(client, x, y);
+			await page.waitForTimeout(40);
+			await dispatchTouchEnd(client);
+		},
+		async startDrag(startX, startY, endX, endY) {
+			await dispatchTouchStart(client, startX, startY);
+			await page.waitForTimeout(16);
+			await dispatchTouchMove(client, endX, endY);
+		},
+		async endDrag() {
+			await dispatchTouchEnd(client);
+		},
+		async fastDrag(startX, startY, endX, endY) {
+			await dispatchTouchStart(client, startX, startY);
+			await dispatchTouchMove(client, endX, endY);
+			await dispatchTouchEnd(client);
+		}
+	};
+}
+
+async function dispatchTouchStart(client, x, y) {
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchStart',
+		touchPoints: [touchPoint(x, y)]
+	});
+}
+
+async function dispatchTouchMove(client, x, y) {
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchMove',
+		touchPoints: [touchPoint(x, y)]
+	});
+}
+
+async function dispatchTouchEnd(client) {
+	await client.send('Input.dispatchTouchEvent', {
+		type: 'touchEnd',
+		touchPoints: []
+	});
+}
+
+function touchPoint(x, y) {
+	return {
+		x: Math.round(x),
+		y: Math.round(y),
+		id: 1,
+		radiusX: 8,
+		radiusY: 8,
+		force: 1
+	};
 }
 
 async function waitForCanvasSize(page) {
@@ -112,7 +234,7 @@ async function hasNonBlankCanvas(page) {
 			const pixel = new Uint8Array(4);
 			gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
 
-			if (pixel.some((channel) => channel !== 0)) {
+			if (pixel[0] !== 0 || pixel[1] !== 0 || pixel[2] !== 0) {
 				return true;
 			}
 		}
@@ -133,4 +255,170 @@ async function waitForBodyTextMatch(page, pattern) {
 		(patternSource) => new RegExp(patternSource).test(document.body.textContent ?? ''),
 		pattern.source
 	);
+}
+
+async function startLocalDevServer() {
+	await assertPortFree(SERVER_HOST, SERVER_PORT);
+
+	const output = [];
+	const command = process.platform === 'win32' ? 'bun.exe' : 'bun';
+	const child = spawn(command, LOCAL_SERVER_ARGS, {
+		cwd: repoRoot,
+		stdio: ['ignore', 'pipe', 'pipe'],
+		windowsHide: true
+	});
+	let exitDetails = null;
+	let spawnError = null;
+
+	child.stdout.on('data', (chunk) => appendServerOutput(output, chunk));
+	child.stderr.on('data', (chunk) => appendServerOutput(output, chunk));
+	child.once('exit', (code, signal) => {
+		exitDetails = { code, signal };
+	});
+	child.once('error', (error) => {
+		spawnError = error;
+	});
+
+	try {
+		await waitForServerReady({
+			getExitDetails: () => exitDetails,
+			getOutput: () => output.join(''),
+			getSpawnError: () => spawnError
+		});
+
+		return child;
+	} catch (error) {
+		await stopLocalDevServer(child);
+		throw error;
+	}
+}
+
+async function waitForServerReady({ getExitDetails, getOutput, getSpawnError }) {
+	const deadline = Date.now() + SERVER_READY_TIMEOUT_MS;
+
+	while (Date.now() < deadline) {
+		const spawnError = getSpawnError();
+		if (spawnError) {
+			throw new Error(`Unable to start local dev server: ${spawnError.message}`);
+		}
+
+		const exitDetails = getExitDetails();
+		if (exitDetails) {
+			throw new Error(formatServerExitError(exitDetails, getOutput()));
+		}
+
+		if (await appResponds()) return;
+		await delay(SERVER_POLL_INTERVAL_MS);
+	}
+
+	throw new Error(
+		`Local dev server did not respond at ${DEFAULT_BASE_URL} within ${SERVER_READY_TIMEOUT_MS}ms.\n${getOutput()}`
+	);
+}
+
+async function appResponds() {
+	try {
+		const response = await fetch(DEFAULT_BASE_URL, {
+			signal: AbortSignal.timeout(1000)
+		});
+
+		return response.ok;
+	} catch {
+		return false;
+	}
+}
+
+async function assertPortFree(host, port) {
+	await new Promise((resolvePromise, rejectPromise) => {
+		const socket = net.createConnection({ host, port });
+		let settled = false;
+
+		function settle(callback, value) {
+			if (settled) return;
+			settled = true;
+			socket.destroy();
+			callback(value);
+		}
+
+		socket.once('connect', () => {
+			settle(
+				rejectPromise,
+				new Error(
+					`Port ${port} is already in use. Set APP_URL to verify an existing server, or stop the process using ${host}:${port}.`
+				)
+			);
+		});
+
+		socket.once('error', (error) => {
+			if (error.code === 'ECONNREFUSED') {
+				settle(resolvePromise);
+				return;
+			}
+
+			settle(rejectPromise, error);
+		});
+
+		socket.setTimeout(1000, () => {
+			settle(
+				rejectPromise,
+				new Error(`Timed out while checking whether ${host}:${port} is available.`)
+			);
+		});
+	});
+}
+
+async function stopLocalDevServer(child) {
+	if (!child || child.exitCode !== null) return;
+
+	if (process.platform === 'win32') {
+		await stopWindowsProcessTree(child.pid);
+		await waitForProcessExit(child, 5000);
+		return;
+	}
+
+	child.kill('SIGTERM');
+	await waitForProcessExit(child, 5000);
+
+	if (child.exitCode === null) {
+		child.kill('SIGKILL');
+		await waitForProcessExit(child, 5000);
+	}
+}
+
+async function stopWindowsProcessTree(pid) {
+	await new Promise((resolvePromise) => {
+		const taskkill = spawn('taskkill.exe', ['/pid', String(pid), '/T', '/F'], {
+			stdio: 'ignore',
+			windowsHide: true
+		});
+		taskkill.once('close', resolvePromise);
+		taskkill.once('error', resolvePromise);
+	});
+}
+
+async function waitForProcessExit(child, timeoutMs) {
+	if (child.exitCode !== null) return;
+
+	await Promise.race([
+		new Promise((resolvePromise) => child.once('exit', resolvePromise)),
+		delay(timeoutMs)
+	]);
+}
+
+function appendServerOutput(output, chunk) {
+	output.push(chunk.toString());
+
+	while (output.join('').length > 8000) {
+		output.shift();
+	}
+}
+
+function formatServerExitError({ code, signal }, output) {
+	return `Local dev server exited before ${DEFAULT_BASE_URL} responded. Port ${SERVER_PORT} may be occupied or the app failed to start. Exit code: ${code}; signal: ${signal}.\n${output}`;
+}
+
+function delay(ms) {
+	return new Promise((resolvePromise) => {
+		setTimeout(resolvePromise, ms);
+	});
 }
