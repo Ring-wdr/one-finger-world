@@ -1,4 +1,11 @@
-import type { ComboStep, Direction2, InputGesture, MoveMode } from '$lib/game/types';
+import type {
+	ComboStep,
+	Direction2,
+	InputFeedbackHandler,
+	InputGesture,
+	MoveMode,
+	ScreenPoint
+} from '$lib/game/types';
 
 export interface PointerSurface {
 	addEventListener(type: string, listener: (event: PointerEvent) => void): void;
@@ -47,7 +54,8 @@ export class InputController {
 	constructor(
 		private readonly target: PointerSurface,
 		private readonly emit: (gesture: InputGesture) => void,
-		private readonly thresholds: InputThresholds = DEFAULT_THRESHOLDS
+		private readonly thresholds: InputThresholds = DEFAULT_THRESHOLDS,
+		private readonly emitFeedback: InputFeedbackHandler = () => undefined
 	) {
 		this.target.addEventListener('pointerdown', this.handlePointerDown);
 		this.target.addEventListener('pointermove', this.handlePointerMove);
@@ -99,6 +107,12 @@ export class InputController {
 		};
 
 		this.target.setPointerCapture?.(event.pointerId);
+		this.emitFeedback({
+			type: 'press',
+			start: this.pointFromEvent(event),
+			thumb: this.pointFromEvent(event),
+			timeStamp: event.timeStamp
+		});
 	};
 
 	private readonly handlePointerMove = (event: PointerEvent) => {
@@ -119,6 +133,14 @@ export class InputController {
 
 		active.lastDirection = this.directionFromStart(active);
 		const mode = this.getMoveMode(active, event.timeStamp);
+		this.emitFeedback({
+			type: 'drag',
+			start: this.startPoint(active),
+			thumb: this.thumbPoint(active),
+			direction: active.lastDirection,
+			mode,
+			timeStamp: event.timeStamp
+		});
 		active.lastMode = mode;
 		this.emit({ type: 'move', mode, direction: active.lastDirection });
 	};
@@ -139,8 +161,17 @@ export class InputController {
 			active.dragStartTime = event.timeStamp;
 		}
 
+		const releaseFeedback = {
+			type: 'release' as const,
+			start: this.startPoint(active),
+			thumb: this.thumbPoint(active),
+			wasDragging: active.dragging,
+			timeStamp: event.timeStamp
+		};
+
 		if (!active.dragging) {
 			this.releaseActivePointer();
+			this.emitFeedback(releaseFeedback);
 			this.active = null;
 
 			if (duration <= this.thresholds.tapMs && distance < this.thresholds.dragStartPx) {
@@ -156,6 +187,7 @@ export class InputController {
 		const direction = this.directionFromStart(active);
 		const speed = distance / Math.max(1, duration);
 		this.releaseActivePointer();
+		this.emitFeedback(releaseFeedback);
 		this.active = null;
 
 		if (speed >= this.thresholds.fastDragPxPerMs) {
@@ -175,14 +207,32 @@ export class InputController {
 	};
 
 	private readonly handlePointerCancel = (event: PointerEvent) => {
-		if (!this.getMatchingActivePointer(event)) return;
+		const active = this.getMatchingActivePointer(event);
+		if (!active) return;
+
+		this.emitFeedback({
+			type: 'cancel',
+			start: this.startPoint(active),
+			thumb: this.thumbPoint(active),
+			wasDragging: active.dragging,
+			timeStamp: event.timeStamp
+		});
 		this.releaseActivePointer();
 		this.active = null;
 		this.emit({ type: 'idle' });
 	};
 
 	private readonly handleLostPointerCapture = (event: PointerEvent) => {
-		if (!this.getMatchingActivePointer(event)) return;
+		const active = this.getMatchingActivePointer(event);
+		if (!active) return;
+
+		this.emitFeedback({
+			type: 'cancel',
+			start: this.startPoint(active),
+			thumb: this.thumbPoint(active),
+			wasDragging: active.dragging,
+			timeStamp: event.timeStamp
+		});
 		this.releaseActivePointer();
 		this.active = null;
 		this.emit({ type: 'idle' });
@@ -199,6 +249,18 @@ export class InputController {
 	private releaseActivePointer() {
 		if (!this.active) return;
 		this.target.releasePointerCapture?.(this.active.pointerId);
+	}
+
+	private pointFromEvent(event: PointerEvent): ScreenPoint {
+		return { x: event.clientX, y: event.clientY };
+	}
+
+	private startPoint(active: ActivePointer): ScreenPoint {
+		return { x: active.startX, y: active.startY };
+	}
+
+	private thumbPoint(active: ActivePointer): ScreenPoint {
+		return { x: active.currentX, y: active.currentY };
 	}
 
 	private distanceFromStart(active: ActivePointer) {

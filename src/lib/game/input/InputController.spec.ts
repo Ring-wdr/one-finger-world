@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { InputGesture } from '$lib/game/types';
+import type { InputFeedbackEvent, InputGesture } from '$lib/game/types';
 import { InputController, type PointerSurface } from './InputController';
 
 type Listener = (event: PointerEvent) => void;
@@ -54,12 +54,117 @@ class FakePointerSurface implements PointerSurface {
 function setup() {
 	const target = new FakePointerSurface();
 	const gestures: InputGesture[] = [];
-	const controller = new InputController(target, (gesture) => gestures.push(gesture));
+	const feedback: InputFeedbackEvent[] = [];
+	const controller = new InputController(
+		target,
+		(gesture) => gestures.push(gesture),
+		undefined,
+		(event) => feedback.push(event)
+	);
 
-	return { target, gestures, controller };
+	return { target, gestures, feedback, controller };
 }
 
 describe('InputController', () => {
+	it('emits press feedback with the fixed start point and initial thumb point', () => {
+		const { target, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 40, clientY: 60, timeStamp: 12 });
+
+		expect(feedback).toEqual([
+			{
+				type: 'press',
+				start: { x: 40, y: 60 },
+				thumb: { x: 40, y: 60 },
+				timeStamp: 12
+			}
+		]);
+	});
+
+	it('emits drag feedback with fixed start and moving thumb points', () => {
+		const { target, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 100, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 120, clientY: 86, timeStamp: 60 });
+
+		expect(feedback).toEqual([
+			{
+				type: 'press',
+				start: { x: 100, y: 100 },
+				thumb: { x: 100, y: 100 },
+				timeStamp: 0
+			},
+			{
+				type: 'drag',
+				start: { x: 100, y: 100 },
+				thumb: { x: 120, y: 86 },
+				direction: expect.objectContaining({
+					x: expect.closeTo(0.8192319205190405, 10),
+					y: expect.closeTo(0.5734623443633283, 10)
+				}),
+				mode: 'walk',
+				timeStamp: 60
+			}
+		]);
+	});
+
+	it('emits release feedback even when the thumb point never leaves the start point', () => {
+		const { target, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 24, clientY: 36, timeStamp: 0 });
+		target.fire('pointerup', { pointerId: 1, clientX: 24, clientY: 36, timeStamp: 80 });
+
+		expect(feedback).toEqual([
+			{
+				type: 'press',
+				start: { x: 24, y: 36 },
+				thumb: { x: 24, y: 36 },
+				timeStamp: 0
+			},
+			{
+				type: 'release',
+				start: { x: 24, y: 36 },
+				thumb: { x: 24, y: 36 },
+				wasDragging: false,
+				timeStamp: 80
+			}
+		]);
+	});
+
+	it('emits cancel feedback for active drag cleanup', () => {
+		const { target, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 4, clientX: 10, clientY: 20, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 4, clientX: 40, clientY: 20, timeStamp: 30 });
+		target.fire('pointercancel', { pointerId: 4, clientX: 40, clientY: 20, timeStamp: 40 });
+
+		expect(feedback.at(-1)).toEqual({
+			type: 'cancel',
+			start: { x: 10, y: 20 },
+			thumb: { x: 40, y: 20 },
+			wasDragging: true,
+			timeStamp: 40
+		});
+	});
+
+	it('does not emit feedback for ignored secondary pointers', () => {
+		const { target, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
+		target.fire('pointerdown', { pointerId: 2, clientX: 80, clientY: 80, timeStamp: 10 });
+		target.fire('pointermove', { pointerId: 2, clientX: 120, clientY: 80, timeStamp: 20 });
+		target.fire('pointerup', { pointerId: 2, clientX: 120, clientY: 80, timeStamp: 30 });
+
+		expect(feedback).toEqual([
+			{
+				type: 'press',
+				start: { x: 0, y: 0 },
+				thumb: { x: 0, y: 0 },
+				timeStamp: 0
+			}
+		]);
+	});
+
 	it('recognizes taps and cycles attack combo steps', () => {
 		const { target, gestures } = setup();
 
