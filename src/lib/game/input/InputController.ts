@@ -1,6 +1,7 @@
 import type {
 	ComboStep,
 	Direction2,
+	InputFeedbackEvent,
 	InputFeedbackHandler,
 	InputGesture,
 	MoveMode,
@@ -107,7 +108,7 @@ export class InputController {
 		};
 
 		this.target.setPointerCapture?.(event.pointerId);
-		this.emitFeedback({
+		this.safeEmitFeedback({
 			type: 'press',
 			start: this.pointFromEvent(event),
 			thumb: this.pointFromEvent(event),
@@ -133,7 +134,7 @@ export class InputController {
 
 		active.lastDirection = this.directionFromStart(active);
 		const mode = this.getMoveMode(active, event.timeStamp);
-		this.emitFeedback({
+		this.safeEmitFeedback({
 			type: 'drag',
 			start: this.startPoint(active),
 			thumb: this.thumbPoint(active),
@@ -171,7 +172,7 @@ export class InputController {
 
 		if (!active.dragging) {
 			this.releaseActivePointer();
-			this.emitFeedback(releaseFeedback);
+			this.safeEmitFeedback(releaseFeedback);
 			this.active = null;
 
 			if (duration <= this.thresholds.tapMs && distance < this.thresholds.dragStartPx) {
@@ -187,7 +188,7 @@ export class InputController {
 		const direction = this.directionFromStart(active);
 		const speed = distance / Math.max(1, duration);
 		this.releaseActivePointer();
-		this.emitFeedback(releaseFeedback);
+		this.safeEmitFeedback(releaseFeedback);
 		this.active = null;
 
 		if (speed >= this.thresholds.fastDragPxPerMs) {
@@ -210,7 +211,10 @@ export class InputController {
 		const active = this.getMatchingActivePointer(event);
 		if (!active) return;
 
-		this.emitFeedback({
+		active.currentX = event.clientX;
+		active.currentY = event.clientY;
+
+		this.safeEmitFeedback({
 			type: 'cancel',
 			start: this.startPoint(active),
 			thumb: this.thumbPoint(active),
@@ -226,7 +230,10 @@ export class InputController {
 		const active = this.getMatchingActivePointer(event);
 		if (!active) return;
 
-		this.emitFeedback({
+		active.currentX = event.clientX;
+		active.currentY = event.clientY;
+
+		this.safeEmitFeedback({
 			type: 'cancel',
 			start: this.startPoint(active),
 			thumb: this.thumbPoint(active),
@@ -261,6 +268,14 @@ export class InputController {
 
 	private thumbPoint(active: ActivePointer): ScreenPoint {
 		return { x: active.currentX, y: active.currentY };
+	}
+
+	private safeEmitFeedback(event: InputFeedbackEvent) {
+		try {
+			this.emitFeedback(event);
+		} catch {
+			// Visual feedback must not interrupt gameplay input handling.
+		}
 	}
 
 	private distanceFromStart(active: ActivePointer) {

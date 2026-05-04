@@ -165,6 +165,62 @@ describe('InputController', () => {
 		]);
 	});
 
+	it('isolates feedback handler errors from gesture emission and cleanup', () => {
+		const target = new FakePointerSurface();
+		const gestures: InputGesture[] = [];
+		new InputController(
+			target,
+			(gesture) => gestures.push(gesture),
+			undefined,
+			() => {
+				throw new Error('feedback failed');
+			}
+		);
+
+		expect(() => {
+			target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
+			target.fire('pointermove', { pointerId: 1, clientX: 20, clientY: 0, timeStamp: 30 });
+			target.fire('pointerup', { pointerId: 1, clientX: 20, clientY: 0, timeStamp: 60 });
+		}).not.toThrow();
+		expect(target.releaseCalls).toEqual([1]);
+		expect(gestures).toEqual([
+			{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } },
+			{ type: 'idle' }
+		]);
+	});
+
+	it('emits cancel feedback with the cancel event thumb point', () => {
+		const { target, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 3, clientX: 10, clientY: 20, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 3, clientX: 40, clientY: 20, timeStamp: 30 });
+		target.fire('pointercancel', { pointerId: 3, clientX: 70, clientY: 90, timeStamp: 40 });
+
+		expect(feedback.at(-1)).toEqual({
+			type: 'cancel',
+			start: { x: 10, y: 20 },
+			thumb: { x: 70, y: 90 },
+			wasDragging: true,
+			timeStamp: 40
+		});
+	});
+
+	it('emits lost capture feedback with the lost capture event thumb point', () => {
+		const { target, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 5, clientX: 10, clientY: 20, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 5, clientX: 40, clientY: 20, timeStamp: 30 });
+		target.fire('lostpointercapture', { pointerId: 5, clientX: 72, clientY: 96, timeStamp: 40 });
+
+		expect(feedback.at(-1)).toEqual({
+			type: 'cancel',
+			start: { x: 10, y: 20 },
+			thumb: { x: 72, y: 96 },
+			wasDragging: true,
+			timeStamp: 40
+		});
+	});
+
 	it('recognizes taps and cycles attack combo steps', () => {
 		const { target, gestures } = setup();
 
