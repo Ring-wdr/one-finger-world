@@ -1,10 +1,12 @@
 import { PlayerActor } from '$lib/game/actors/PlayerActor';
+import { PhysicsFeedbackActor } from '$lib/game/feedback/PhysicsFeedbackActor';
 import { InputController } from '$lib/game/input/InputController';
 import {
 	IDLE_ACTION,
 	type ActionState,
 	type ActionStateHandler,
 	type Direction2,
+	type InputFeedbackEvent,
 	type InputGesture,
 	type MoveMode,
 	type RuntimeErrorHandler
@@ -39,6 +41,7 @@ export class GameRuntime {
 	private camera: THREE.PerspectiveCamera | null = null;
 	private input: InputController | null = null;
 	private player: PlayerActor | null = null;
+	private feedback: PhysicsFeedbackActor | null = null;
 	private world: BlockWorld | null = null;
 	private animationFrame: number | null = null;
 	private resizeListener: (() => void) | null = null;
@@ -56,6 +59,11 @@ export class GameRuntime {
 	private readonly cameraForward = new THREE.Vector3();
 	private readonly cameraRight = new THREE.Vector3();
 	private readonly convertedDirection = new THREE.Vector3();
+	private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+	private readonly feedbackRaycaster = new THREE.Raycaster();
+	private readonly feedbackNdc = new THREE.Vector2();
+	private readonly feedbackStartWorld = new THREE.Vector3();
+	private readonly feedbackThumbWorld = new THREE.Vector3();
 
 	constructor({ container, onActionStateChange, onRuntimeError }: GameRuntimeOptions) {
 		this.container = container;
@@ -88,6 +96,9 @@ export class GameRuntime {
 
 		this.input?.dispose();
 		this.input = null;
+
+		this.feedback?.dispose();
+		this.feedback = null;
 
 		this.player?.dispose();
 		this.player = null;
@@ -138,6 +149,10 @@ export class GameRuntime {
 		player.faceWorldDirection(this.latestDirection);
 		scene.add(player.group);
 
+		const feedback = new PhysicsFeedbackActor();
+		this.feedback = feedback;
+		scene.add(feedback.group);
+
 		const renderer = new THREE.WebGLRenderer({
 			antialias: true,
 			preserveDrawingBuffer: true
@@ -147,7 +162,12 @@ export class GameRuntime {
 		this.renderer = renderer;
 		this.container.appendChild(renderer.domElement);
 
-		this.input = new InputController(renderer.domElement, this.handleGesture);
+		this.input = new InputController(
+			renderer.domElement,
+			this.handleGesture,
+			undefined,
+			this.handleInputFeedback
+		);
 		this.resizeListener = this.handleResize;
 		window.addEventListener('resize', this.resizeListener);
 		this.handleResize();
@@ -170,6 +190,7 @@ export class GameRuntime {
 		this.input?.update(now);
 		this.updatePlayer(deltaSeconds);
 		this.updateAttackState(deltaSeconds);
+		this.feedback?.update(deltaSeconds);
 		this.updateCamera(deltaSeconds);
 
 		if (this.renderer && this.scene && this.camera) {
@@ -194,6 +215,10 @@ export class GameRuntime {
 
 	private readonly handleGesture = (gesture: InputGesture) => {
 		if (this.disposed) return;
+
+		if (this.player) {
+			this.feedback?.handleGesture(gesture, this.player.group.position);
+		}
 
 		if (gesture.type === 'attack') {
 			this.player?.playAttack(gesture.comboStep);
@@ -238,6 +263,39 @@ export class GameRuntime {
 			this.publishAction(IDLE_ACTION);
 		}
 	};
+
+	private readonly handleInputFeedback = (event: InputFeedbackEvent) => {
+		if (this.disposed || !this.feedback) return;
+
+		this.screenPointToGround(event.start, this.feedbackStartWorld);
+		this.screenPointToGround(event.thumb, this.feedbackThumbWorld);
+		this.feedback.handlePointerFeedback({
+			event,
+			startWorld: this.feedbackStartWorld,
+			thumbWorld: this.feedbackThumbWorld
+		});
+	};
+
+	private screenPointToGround(point: { x: number; y: number }, target: THREE.Vector3) {
+		if (!this.camera || !this.renderer || !this.player) {
+			return target.set(0, 0, 0);
+		}
+
+		const bounds = this.renderer.domElement.getBoundingClientRect();
+		const width = Math.max(1, bounds.width);
+		const height = Math.max(1, bounds.height);
+		this.feedbackNdc.set(
+			((point.x - bounds.left) / width) * 2 - 1,
+			-(((point.y - bounds.top) / height) * 2 - 1)
+		);
+
+		this.feedbackRaycaster.setFromCamera(this.feedbackNdc, this.camera);
+		if (this.feedbackRaycaster.ray.intersectPlane(this.groundPlane, target)) {
+			return target;
+		}
+
+		return target.copy(this.player.group.position);
+	}
 
 	private updatePlayer(deltaSeconds: number) {
 		if (!this.player || !this.world) return;
