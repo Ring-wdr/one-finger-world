@@ -27,6 +27,7 @@ const WALK_SPEED = 2.8;
 const RUN_SPEED = 4.8;
 const DASH_SPEED = 11;
 const DASH_DURATION_SECONDS = 0.18;
+const ATTACK_FEEDBACK_SECONDS = 0.28;
 const MAX_DELTA_SECONDS = 0.05;
 
 export class GameRuntime {
@@ -48,6 +49,8 @@ export class GameRuntime {
 	private readonly latestDirection = new THREE.Vector3(0, 0, 1);
 	private readonly dashDirection = new THREE.Vector3();
 	private dashRemainingSeconds = 0;
+	private attackRemainingSeconds = 0;
+	private lastPublishedLabel: string | null = null;
 	private readonly cameraTarget = new THREE.Vector3();
 	private readonly desiredCameraPosition = new THREE.Vector3();
 	private readonly cameraForward = new THREE.Vector3();
@@ -166,6 +169,7 @@ export class GameRuntime {
 
 		this.input?.update(now);
 		this.updatePlayer(deltaSeconds);
+		this.updateAttackState(deltaSeconds);
 		this.updateCamera(deltaSeconds);
 
 		if (this.renderer && this.scene && this.camera) {
@@ -193,6 +197,7 @@ export class GameRuntime {
 
 		if (gesture.type === 'attack') {
 			this.player?.playAttack(gesture.comboStep);
+			this.attackRemainingSeconds = ATTACK_FEEDBACK_SECONDS;
 			this.publishAction({
 				kind: 'attack',
 				label: `Attack ${gesture.comboStep}`,
@@ -203,6 +208,7 @@ export class GameRuntime {
 
 		if (gesture.type === 'move') {
 			const direction = this.directionFromScreen(gesture.direction);
+			this.attackRemainingSeconds = 0;
 			this.movementDirection.copy(direction);
 			this.latestDirection.copy(direction);
 			this.movementMode = gesture.mode;
@@ -217,6 +223,7 @@ export class GameRuntime {
 
 		if (gesture.type === 'dash') {
 			const direction = this.directionFromScreen(gesture.direction);
+			this.attackRemainingSeconds = 0;
 			this.dashDirection.copy(direction.lengthSq() > 0 ? direction : this.latestDirection);
 			this.latestDirection.copy(this.dashDirection);
 			this.movementMode = null;
@@ -227,7 +234,7 @@ export class GameRuntime {
 		}
 
 		this.movementMode = null;
-		if (this.dashRemainingSeconds <= 0) {
+		if (this.dashRemainingSeconds <= 0 && this.attackRemainingSeconds <= 0) {
 			this.publishAction(IDLE_ACTION);
 		}
 	};
@@ -247,7 +254,11 @@ export class GameRuntime {
 			isMoving = true;
 			isRunning = true;
 
-			if (this.dashRemainingSeconds === 0 && this.movementMode === null) {
+			if (
+				this.dashRemainingSeconds === 0 &&
+				this.movementMode === null &&
+				this.attackRemainingSeconds <= 0
+			) {
 				this.publishAction(IDLE_ACTION);
 			}
 		} else if (this.movementMode) {
@@ -262,6 +273,19 @@ export class GameRuntime {
 		this.world.clampPosition(position, PLAYER_MARGIN);
 		this.player.setPosition(position);
 		this.player.update(deltaSeconds, isMoving, isRunning, isDashing);
+	}
+
+	private updateAttackState(deltaSeconds: number) {
+		if (this.attackRemainingSeconds <= 0) return;
+
+		this.attackRemainingSeconds = Math.max(0, this.attackRemainingSeconds - deltaSeconds);
+		if (
+			this.attackRemainingSeconds === 0 &&
+			this.movementMode === null &&
+			this.dashRemainingSeconds <= 0
+		) {
+			this.publishAction(IDLE_ACTION);
+		}
 	}
 
 	private updateCamera(deltaSeconds: number) {
@@ -299,7 +323,7 @@ export class GameRuntime {
 			this.cameraForward.normalize();
 		}
 
-		this.cameraRight.crossVectors(WORLD_UP, this.cameraForward);
+		this.cameraRight.crossVectors(this.cameraForward, WORLD_UP);
 		if (this.cameraRight.lengthSq() <= 0.000001) {
 			this.cameraRight.set(1, 0, 0);
 		} else {
@@ -320,6 +344,9 @@ export class GameRuntime {
 
 	private publishAction(state: ActionState) {
 		if (this.disposed) return;
+		if (state.label === this.lastPublishedLabel) return;
+
+		this.lastPublishedLabel = state.label;
 		this.onActionStateChange?.(state);
 	}
 }
