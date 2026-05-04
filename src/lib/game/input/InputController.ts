@@ -134,6 +134,11 @@ export class InputController {
 		const duration = event.timeStamp - active.startTime;
 		const distance = this.distanceFromStart(active);
 
+		if (!active.dragging && distance >= this.thresholds.dragStartPx) {
+			active.dragging = true;
+			active.dragStartTime = event.timeStamp;
+		}
+
 		if (!active.dragging) {
 			this.releaseActivePointer();
 			this.active = null;
@@ -222,7 +227,7 @@ export class InputController {
 
 function normalizeSignedZero(direction: Direction2): Direction2 {
 	return {
-		x: Object.is(direction.x, -0) ? 0 : direction.x,
-		y: Object.is(direction.y, -0) ? -0 : direction.y
+		x: direction.x === 0 ? 0 : direction.x,
+		y: direction.y === 0 ? 0 : direction.y
 	};
 }

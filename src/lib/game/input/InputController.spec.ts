@@ -45,6 +45,10 @@ class FakePointerSurface implements PointerSurface {
 			listener(sample);
 		}
 	}
+
+	listenerCount(type: string) {
+		return this.listeners[type]?.length ?? 0;
+	}
 }
 
 function setup() {
@@ -95,7 +99,7 @@ describe('InputController', () => {
 		target.fire('pointerup', { pointerId: 1, clientX: 114, clientY: 100, timeStamp: 120 });
 
 		expect(gestures).toEqual([
-			{ type: 'move', mode: 'walk', direction: { x: 1, y: -0 } },
+			{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } },
 			{ type: 'idle' }
 		]);
 	});
@@ -109,8 +113,8 @@ describe('InputController', () => {
 		controller.update(550);
 
 		expect(gestures).toEqual([
-			{ type: 'move', mode: 'walk', direction: { x: 1, y: -0 } },
-			{ type: 'move', mode: 'run', direction: { x: 1, y: -0 } }
+			{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } },
+			{ type: 'move', mode: 'run', direction: { x: 1, y: 0 } }
 		]);
 	});
 
@@ -120,7 +124,7 @@ describe('InputController', () => {
 		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
 		target.fire('pointermove', { pointerId: 1, clientX: 72, clientY: 0, timeStamp: 140 });
 
-		expect(gestures).toEqual([{ type: 'move', mode: 'run', direction: { x: 1, y: -0 } }]);
+		expect(gestures).toEqual([{ type: 'move', mode: 'run', direction: { x: 1, y: 0 } }]);
 	});
 
 	it('requires two fast drags inside the dash window and uses the latest direction', () => {
@@ -135,11 +139,40 @@ describe('InputController', () => {
 		target.fire('pointerup', { pointerId: 1, clientX: 0, clientY: -80, timeStamp: 340 });
 
 		expect(gestures).toEqual([
-			{ type: 'move', mode: 'run', direction: { x: 1, y: -0 } },
+			{ type: 'move', mode: 'run', direction: { x: 1, y: 0 } },
 			{ type: 'idle' },
 			{ type: 'move', mode: 'run', direction: { x: 0, y: 1 } },
 			{ type: 'dash', direction: { x: 0, y: 1 } }
 		]);
+	});
+
+	it('treats release-only swipes as fast drags for dash detection', () => {
+		const { target, gestures } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
+		target.fire('pointerup', { pointerId: 1, clientX: 80, clientY: 0, timeStamp: 80 });
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 260 });
+		target.fire('pointerup', { pointerId: 1, clientX: 0, clientY: -80, timeStamp: 340 });
+
+		expect(gestures).toEqual([{ type: 'idle' }, { type: 'dash', direction: { x: 0, y: 1 } }]);
+	});
+
+	it('does not expose signed zero in direction payloads', () => {
+		const { target, gestures } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 14, clientY: 0, timeStamp: 80 });
+
+		expect(gestures).toHaveLength(1);
+		const [gesture] = gestures;
+		expect(gesture.type).toBe('move');
+
+		if (gesture.type === 'move') {
+			expect(gesture.direction).toEqual({ x: 1, y: 0 });
+			expect(Object.is(gesture.direction.x, -0)).toBe(false);
+			expect(Object.is(gesture.direction.y, -0)).toBe(false);
+		}
 	});
 
 	it('emits idle for a long press released under the drag threshold', () => {
@@ -164,10 +197,31 @@ describe('InputController', () => {
 
 		expect(target.releaseCalls).toEqual([7, 8]);
 		expect(gestures).toEqual([
-			{ type: 'move', mode: 'walk', direction: { x: 1, y: -0 } },
+			{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } },
 			{ type: 'idle' },
 			{ type: 'move', mode: 'walk', direction: { x: 0, y: 1 } },
 			{ type: 'idle' }
 		]);
+	});
+
+	it('dispose releases active capture, removes listeners, and suppresses later emissions', () => {
+		const { target, gestures, controller } = setup();
+
+		expect(target.listenerCount('pointerdown')).toBe(1);
+		target.fire('pointerdown', { pointerId: 5, clientX: 0, clientY: 0, timeStamp: 0 });
+
+		controller.dispose();
+		controller.dispose();
+		target.fire('pointermove', { pointerId: 5, clientX: 80, clientY: 0, timeStamp: 100 });
+		target.fire('pointerup', { pointerId: 5, clientX: 80, clientY: 0, timeStamp: 120 });
+		controller.update(1000);
+
+		expect(target.releaseCalls).toEqual([5]);
+		expect(target.listenerCount('pointerdown')).toBe(0);
+		expect(target.listenerCount('pointermove')).toBe(0);
+		expect(target.listenerCount('pointerup')).toBe(0);
+		expect(target.listenerCount('pointercancel')).toBe(0);
+		expect(target.listenerCount('lostpointercapture')).toBe(0);
+		expect(gestures).toEqual([]);
 	});
 });
