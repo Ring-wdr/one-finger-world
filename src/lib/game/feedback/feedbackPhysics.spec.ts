@@ -29,7 +29,20 @@ describe('feedbackPhysics', () => {
 
 		stepSpringPoint(point, { x: 5, y: 5 }, 0, DEFAULT_FEEDBACK_SPRING);
 		stepSpringPoint(point, { x: 5, y: 5 }, Number.NaN, DEFAULT_FEEDBACK_SPRING);
+		stepSpringPoint(point, { x: 5, y: 5 }, Number.POSITIVE_INFINITY, DEFAULT_FEEDBACK_SPRING);
 
 		expect(point).toEqual({ x: 0, y: 0, vx: 0, vy: 0 });
+	});
+
+	it('keeps large finite delta time bounded and finite', () => {
+		const point = createSpringPoint(0, 0);
+
+		stepSpringPoint(point, { x: 1, y: 0 }, 1, DEFAULT_FEEDBACK_SPRING);
+
+		expect(Number.isFinite(point.x)).toBe(true);
+		expect(Math.abs(point.x)).toBeLessThan(2);
+		expect(Number.isFinite(point.y)).toBe(true);
+		expect(Number.isFinite(point.vx)).toBe(true);
+		expect(Number.isFinite(point.vy)).toBe(true);
 	});
 });

@@ -13,6 +13,7 @@ export interface SpringConfig {
 }
 
 export const SAME_POINT_EPSILON_PX = 6;
+export const MAX_SPRING_DELTA_SECONDS = 0.05;
 
 export const DEFAULT_FEEDBACK_SPRING: SpringConfig = {
 	stiffness: 120,
@@ -27,7 +28,7 @@ export function isThumbPointVisible(
 	start: ScreenPoint,
 	thumb: ScreenPoint,
 	epsilonPx = SAME_POINT_EPSILON_PX
-) {
+): boolean {
 	return Math.hypot(thumb.x - start.x, thumb.y - start.y) >= epsilonPx;
 }
 
@@ -36,9 +37,25 @@ export function stepSpringPoint(
 	target: ScreenPoint,
 	deltaSeconds: number,
 	config: SpringConfig
-) {
+): SpringPoint {
 	if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return point;
 
+	let remainingSeconds = deltaSeconds;
+	while (remainingSeconds > 0) {
+		const stepSeconds = Math.min(remainingSeconds, MAX_SPRING_DELTA_SECONDS);
+		stepSpringPointOnce(point, target, stepSeconds, config);
+		remainingSeconds -= stepSeconds;
+	}
+
+	return point;
+}
+
+function stepSpringPointOnce(
+	point: SpringPoint,
+	target: ScreenPoint,
+	deltaSeconds: number,
+	config: SpringConfig
+): void {
 	const ax = (target.x - point.x) * config.stiffness - point.vx * config.damping;
 	const ay = (target.y - point.y) * config.stiffness - point.vy * config.damping;
 
@@ -46,6 +63,4 @@ export function stepSpringPoint(
 	point.vy += ay * deltaSeconds;
 	point.x += point.vx * deltaSeconds;
 	point.y += point.vy * deltaSeconds;
-
-	return point;
 }
