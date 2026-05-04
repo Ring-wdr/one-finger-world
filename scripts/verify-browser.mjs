@@ -86,18 +86,24 @@ async function verifyViewport(browser, viewport) {
 			x: viewport.width / 2,
 			y: viewport.height * 0.83
 		};
-		const beforeFeedbackSignature = await canvasSignature(page);
+		const idleFeedbackSignature = await canvasRegionSignature(page, feedbackPoint);
+		await page.waitForTimeout(120);
+		assert.equal(
+			await canvasRegionSignature(page, feedbackPoint),
+			idleFeedbackSignature,
+			`${viewport.name} feedback sample region should stay stable before press`
+		);
+
 		// Same-point press/hold: thumb marker and tether stay skipped, only the start anchor pulse should render.
 		await input.startDrag(feedbackPoint.x, feedbackPoint.y, feedbackPoint.x, feedbackPoint.y);
 		await page.waitForTimeout(120);
-		const pressFeedbackSignature = await canvasSignature(page);
+		const pressFeedbackSignature = await canvasRegionSignature(page, feedbackPoint);
 		await page.waitForTimeout(90);
 		await input.endDrag();
-		await waitForBodyText(page, 'Idle');
 		assert.notEqual(
 			pressFeedbackSignature,
-			beforeFeedbackSignature,
-			`${viewport.name} press feedback should alter the canvas before movement`
+			idleFeedbackSignature,
+			`${viewport.name} press feedback should alter the canvas near the start anchor before movement`
 		);
 
 		await input.tap(center.x, center.y);
@@ -310,8 +316,8 @@ async function hasNonBlankCanvas(page) {
 	});
 }
 
-async function canvasSignature(page) {
-	return page.locator('canvas').first().evaluate((canvas) => {
+async function canvasRegionSignature(page, point, radius = 96) {
+	return page.locator('canvas').first().evaluate((canvas, { point, radius }) => {
 		if (!(canvas instanceof HTMLCanvasElement)) return '';
 
 		const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
@@ -321,12 +327,24 @@ async function canvasSignature(page) {
 		const height = gl.drawingBufferHeight;
 		if (width <= 0 || height <= 0) return '';
 
-		const stride = 16;
+		const bounds = canvas.getBoundingClientRect();
+		if (bounds.width <= 0 || bounds.height <= 0) return '';
+
+		const scaleX = width / bounds.width;
+		const scaleY = height / bounds.height;
+		const centerX = Math.round((point.x - bounds.left) * scaleX);
+		const centerY = Math.round(height - (point.y - bounds.top) * scaleY);
+		const bufferRadius = Math.round(radius * Math.max(scaleX, scaleY));
+		const minX = Math.max(0, centerX - bufferRadius);
+		const maxX = Math.min(width - 1, centerX + bufferRadius);
+		const minY = Math.max(0, centerY - bufferRadius);
+		const maxY = Math.min(height - 1, centerY + bufferRadius);
+		const stride = 8;
+		const pixel = new Uint8Array(4);
 		let hash = 2166136261;
 
-		for (let y = 0; y < height; y += stride) {
-			for (let x = 0; x < width; x += stride) {
-				const pixel = new Uint8Array(4);
+		for (let y = minY; y <= maxY; y += stride) {
+			for (let x = minX; x <= maxX; x += stride) {
 				gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
 				hash ^= pixel[0];
 				hash = Math.imul(hash, 16777619);
@@ -337,22 +355,8 @@ async function canvasSignature(page) {
 			}
 		}
 
-		for (const [x, y] of [
-			[width - 1, height - 1],
-			[Math.floor(width / 2), Math.floor(height / 2)]
-		]) {
-			const pixel = new Uint8Array(4);
-			gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-			hash ^= pixel[0];
-			hash = Math.imul(hash, 16777619);
-			hash ^= pixel[1];
-			hash = Math.imul(hash, 16777619);
-			hash ^= pixel[2];
-			hash = Math.imul(hash, 16777619);
-		}
-
-		return `${width}x${height}:${hash >>> 0}`;
-	});
+		return `${centerX},${centerY},${bufferRadius}:${hash >>> 0}`;
+	}, { point, radius });
 }
 
 async function waitForBodyText(page, text) {
