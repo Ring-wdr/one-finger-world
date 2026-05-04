@@ -1,5 +1,4 @@
 import type { ComboStep } from '$lib/game/types';
-// @ts-expect-error The repo has the three runtime package but no declarations in this task scope.
 import * as THREE from 'three';
 
 export class PlayerActor {
@@ -151,6 +150,9 @@ export class PlayerActor {
 	}
 
 	dispose() {
+		this.group.removeFromParent();
+		this.group.clear();
+
 		for (const geometry of this.geometries) {
 			geometry.dispose();
 		}

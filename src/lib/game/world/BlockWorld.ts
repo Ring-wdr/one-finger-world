@@ -1,4 +1,3 @@
-// @ts-expect-error The repo has the three runtime package but no declarations in this task scope.
 import * as THREE from 'three';
 
 export interface WorldBounds {
@@ -52,13 +51,24 @@ export class BlockWorld {
 		}
 	}
 
-	clampPosition(position: THREE.Vector3) {
-		position.x = THREE.MathUtils.clamp(position.x, this.bounds.minX, this.bounds.maxX);
-		position.z = THREE.MathUtils.clamp(position.z, this.bounds.minZ, this.bounds.maxZ);
+	clampPosition(position: THREE.Vector3, margin = 0.35) {
+		position.x = THREE.MathUtils.clamp(
+			position.x,
+			this.bounds.minX + margin,
+			this.bounds.maxX - margin
+		);
+		position.z = THREE.MathUtils.clamp(
+			position.z,
+			this.bounds.minZ + margin,
+			this.bounds.maxZ - margin
+		);
 		return position;
 	}
 
 	dispose() {
+		this.group.removeFromParent();
+		this.group.clear();
+
 		for (const geometry of this.geometries) {
 			geometry.dispose();
 		}
