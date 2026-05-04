@@ -10,6 +10,9 @@ const SERVER_HOST = '127.0.0.1';
 const SERVER_PORT = 5173;
 const SERVER_READY_TIMEOUT_MS = 30000;
 const SERVER_POLL_INTERVAL_MS = 250;
+const PLAY_PATHNAME = '/play';
+const START_NAVIGATION_TIMEOUT_MS = 5000;
+const START_RETRY_INTERVAL_MS = 100;
 const LOCAL_SERVER_ARGS = [
 	'run',
 	'dev',
@@ -63,16 +66,7 @@ async function verifyViewport(browser, viewport) {
 	try {
 		await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
 
-		const startButton = page.getByRole('button', { name: 'Game Start' });
-		await startButton.waitFor({ state: 'visible' });
-
-		if (viewport.touch) {
-			await startButton.tap();
-		} else {
-			await startButton.click();
-		}
-
-		await page.waitForURL((url) => new URL(url).pathname === '/play');
+		await startGame(page, viewport);
 
 		const canvas = page.locator('canvas').first();
 		await canvas.waitFor({ state: 'visible' });
@@ -107,10 +101,65 @@ async function verifyViewport(browser, viewport) {
 			page.waitForURL((url) => new URL(url).pathname === homePathname),
 			page.goBack()
 		]);
-		await startButton.waitFor({ state: 'visible' });
+		await page.getByRole('button', { name: 'Game Start' }).waitFor({ state: 'visible' });
 	} finally {
 		await context.close();
 	}
+}
+
+async function startGame(page, viewport) {
+	const deadline = Date.now() + START_NAVIGATION_TIMEOUT_MS;
+	let attempts = 0;
+	let lastError = null;
+
+	while (Date.now() < deadline) {
+		if (isPathname(page.url(), PLAY_PATHNAME)) return;
+
+		const remaining = Math.max(1, deadline - Date.now());
+		const startButton = page.getByRole('button', { name: 'Game Start' });
+
+		try {
+			await startButton.waitFor({
+				state: 'visible',
+				timeout: Math.min(1000, remaining)
+			});
+			attempts += 1;
+
+			if (viewport.touch) {
+				await startButton.tap({ timeout: Math.min(1000, remaining) });
+			} else {
+				await startButton.click({ timeout: Math.min(1000, remaining) });
+			}
+
+			if (await waitForPlayRoute(page, Math.min(START_RETRY_INTERVAL_MS, remaining))) {
+				return;
+			}
+		} catch (error) {
+			lastError = error;
+		}
+
+		await delay(Math.min(START_RETRY_INTERVAL_MS, Math.max(0, deadline - Date.now())));
+	}
+
+	const details = lastError instanceof Error ? ` Last error: ${lastError.message}` : '';
+	throw new Error(
+		`Game Start did not navigate to ${PLAY_PATHNAME} within ${START_NAVIGATION_TIMEOUT_MS}ms after ${attempts} attempts. Current URL: ${page.url()}.${details}`
+	);
+}
+
+async function waitForPlayRoute(page, timeoutMs) {
+	try {
+		await page.waitForURL((url) => new URL(url).pathname === PLAY_PATHNAME, {
+			timeout: timeoutMs
+		});
+		return true;
+	} catch {
+		return isPathname(page.url(), PLAY_PATHNAME);
+	}
+}
+
+function isPathname(url, pathname) {
+	return new URL(url).pathname === pathname;
 }
 
 function createMouseInput(page) {
