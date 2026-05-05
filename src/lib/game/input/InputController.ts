@@ -18,7 +18,6 @@ export interface PointerSurface {
 interface InputThresholds {
 	tapMs: number;
 	dragStartPx: number;
-	runHoldMs: number;
 	runDistancePx: number;
 	fastDragPxPerMs: number;
 	dashWindowMs: number;
@@ -27,7 +26,6 @@ interface InputThresholds {
 const DEFAULT_THRESHOLDS: InputThresholds = {
 	tapMs: 180,
 	dragStartPx: 14,
-	runHoldMs: 450,
 	runDistancePx: 72,
 	fastDragPxPerMs: 0.9,
 	dashWindowMs: 320
@@ -65,10 +63,10 @@ export class InputController {
 		this.target.addEventListener('lostpointercapture', this.handleLostPointerCapture);
 	}
 
-	update(now: number) {
+	update() {
 		if (!this.active?.dragging || this.disposed) return;
 
-		const nextMode = this.getMoveMode(this.active, now);
+		const nextMode = this.getMoveMode(this.active);
 		if (nextMode !== this.active.lastMode) {
 			this.active.lastMode = nextMode;
 			this.emit({ type: 'move', mode: nextMode, direction: this.active.lastDirection });
@@ -133,7 +131,7 @@ export class InputController {
 		if (!active.dragging) return;
 
 		active.lastDirection = this.directionFromStart(active);
-		const mode = this.getMoveMode(active, event.timeStamp);
+		const mode = this.getMoveMode(active);
 		this.safeEmitFeedback({
 			type: 'drag',
 			start: this.startPoint(active),
@@ -293,13 +291,11 @@ export class InputController {
 		return normalizeSignedZero({ x: dx / length, y: -dy / length });
 	}
 
-	private getMoveMode(active: ActivePointer, now: number): MoveMode {
+	private getMoveMode(active: ActivePointer): MoveMode {
 		const distance = this.distanceFromStart(active);
-		const dragStartTime = active.dragStartTime ?? active.startTime;
-		const heldLongEnough = now - dragStartTime >= this.thresholds.runHoldMs;
 		const draggedFarEnough = distance >= this.thresholds.runDistancePx;
 
-		return heldLongEnough || draggedFarEnough ? 'run' : 'walk';
+		return draggedFarEnough ? 'run' : 'walk';
 	}
 }
 

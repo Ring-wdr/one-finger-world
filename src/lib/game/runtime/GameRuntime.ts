@@ -198,7 +198,7 @@ export class GameRuntime {
 		);
 		this.previousTime = now;
 
-		this.input?.update(now);
+		this.input?.update();
 		this.updatePlayer(deltaSeconds);
 		this.updateAttackState(deltaSeconds);
 		this.feedback?.update(deltaSeconds);

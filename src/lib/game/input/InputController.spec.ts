@@ -265,21 +265,27 @@ describe('InputController', () => {
 		]);
 	});
 
-	it('upgrades drag to run by hold duration', () => {
+	it('keeps a held short drag in walk mode', () => {
 		const { target, gestures, controller } = setup();
 
 		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
 		target.fire('pointermove', { pointerId: 1, clientX: 20, clientY: 0, timeStamp: 100 });
-		controller.update(549);
-		controller.update(550);
+		controller.update();
+		controller.update();
 
-		expect(gestures).toEqual([
-			{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } },
-			{ type: 'move', mode: 'run', direction: { x: 1, y: 0 } }
-		]);
+		expect(gestures).toEqual([{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } }]);
 	});
 
-	it('upgrades drag to run by drag distance', () => {
+	it('keeps short drags in walk mode', () => {
+		const { target, gestures } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 70, clientY: 0, timeStamp: 140 });
+
+		expect(gestures).toEqual([{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } }]);
+	});
+
+	it('upgrades drag to run by clear long drag distance', () => {
 		const { target, gestures } = setup();
 
 		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
@@ -394,7 +400,7 @@ describe('InputController', () => {
 		controller.dispose();
 		target.fire('pointermove', { pointerId: 5, clientX: 80, clientY: 0, timeStamp: 100 });
 		target.fire('pointerup', { pointerId: 5, clientX: 80, clientY: 0, timeStamp: 120 });
-		controller.update(1000);
+		controller.update();
 
 		expect(target.releaseCalls).toEqual([5]);
 		expect(target.listenerCount('pointerdown')).toBe(0);
