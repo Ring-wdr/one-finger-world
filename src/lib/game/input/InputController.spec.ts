@@ -307,6 +307,25 @@ describe('InputController', () => {
 		]);
 	});
 
+	it('measures fast drag speed from drag start instead of pointer down latency', () => {
+		const { target, gestures } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 110, clientY: 0, timeStamp: 170 });
+		target.fire('pointerup', { pointerId: 1, clientX: 110, clientY: 0, timeStamp: 260 });
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 420 });
+		target.fire('pointermove', { pointerId: 1, clientX: 110, clientY: 0, timeStamp: 530 });
+		target.fire('pointerup', { pointerId: 1, clientX: 110, clientY: 0, timeStamp: 560 });
+
+		expect(gestures).toEqual([
+			{ type: 'move', mode: 'run', direction: { x: 1, y: 0 } },
+			{ type: 'idle' },
+			{ type: 'move', mode: 'run', direction: { x: 1, y: 0 } },
+			{ type: 'dash', direction: { x: 1, y: 0 } }
+		]);
+	});
+
 	it('treats release-only swipes as fast drags for dash detection', () => {
 		const { target, gestures } = setup();
 

@@ -38,7 +38,9 @@ export class GameRuntime {
 	private onRuntimeError: RuntimeErrorHandler | null;
 	private renderer: THREE.WebGLRenderer | null = null;
 	private scene: THREE.Scene | null = null;
+	private feedbackScene: THREE.Scene | null = null;
 	private camera: THREE.PerspectiveCamera | null = null;
+	private feedbackCamera: THREE.OrthographicCamera | null = null;
 	private input: InputController | null = null;
 	private player: PlayerActor | null = null;
 	private feedback: PhysicsFeedbackActor | null = null;
@@ -59,11 +61,8 @@ export class GameRuntime {
 	private readonly cameraForward = new THREE.Vector3();
 	private readonly cameraRight = new THREE.Vector3();
 	private readonly convertedDirection = new THREE.Vector3();
-	private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-	private readonly feedbackRaycaster = new THREE.Raycaster();
-	private readonly feedbackNdc = new THREE.Vector2();
-	private readonly feedbackStartWorld = new THREE.Vector3();
-	private readonly feedbackThumbWorld = new THREE.Vector3();
+	private readonly feedbackStartScreen = { x: 0, y: 0 };
+	private readonly feedbackThumbScreen = { x: 0, y: 0 };
 
 	constructor({ container, onActionStateChange, onRuntimeError }: GameRuntimeOptions) {
 		this.container = container;
@@ -108,7 +107,10 @@ export class GameRuntime {
 
 		this.scene?.clear();
 		this.scene = null;
+		this.feedbackScene?.clear();
+		this.feedbackScene = null;
 		this.camera = null;
+		this.feedbackCamera = null;
 
 		const renderer = this.renderer;
 		if (renderer) {
@@ -132,6 +134,13 @@ export class GameRuntime {
 		const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 80);
 		this.camera = camera;
 
+		const feedbackScene = new THREE.Scene();
+		this.feedbackScene = feedbackScene;
+
+		const feedbackCamera = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0, 10);
+		feedbackCamera.position.z = 5;
+		this.feedbackCamera = feedbackCamera;
+
 		const hemisphereLight = new THREE.HemisphereLight(0xb9dcff, 0x52645a, 1.9);
 		scene.add(hemisphereLight);
 
@@ -151,12 +160,14 @@ export class GameRuntime {
 
 		const feedback = new PhysicsFeedbackActor();
 		this.feedback = feedback;
-		scene.add(feedback.group);
+		scene.add(feedback.worldGroup);
+		feedbackScene.add(feedback.group);
 
 		const renderer = new THREE.WebGLRenderer({
 			antialias: true,
 			preserveDrawingBuffer: true
 		});
+		renderer.autoClear = false;
 		renderer.outputColorSpace = THREE.SRGBColorSpace;
 		renderer.domElement.style.touchAction = 'none';
 		this.renderer = renderer;
@@ -194,7 +205,12 @@ export class GameRuntime {
 		this.updateCamera(deltaSeconds);
 
 		if (this.renderer && this.scene && this.camera) {
+			this.renderer.clear();
 			this.renderer.render(this.scene, this.camera);
+			if (this.feedbackScene && this.feedbackCamera) {
+				this.renderer.clearDepth();
+				this.renderer.render(this.feedbackScene, this.feedbackCamera);
+			}
 		}
 
 		this.animationFrame = window.requestAnimationFrame(this.tick);
@@ -211,6 +227,14 @@ export class GameRuntime {
 		this.renderer.setSize(width, height, false);
 		this.camera.aspect = width / height;
 		this.camera.updateProjectionMatrix();
+		if (this.feedbackCamera) {
+			this.feedbackCamera.left = -width * 0.5;
+			this.feedbackCamera.right = width * 0.5;
+			this.feedbackCamera.top = height * 0.5;
+			this.feedbackCamera.bottom = -height * 0.5;
+			this.feedbackCamera.updateProjectionMatrix();
+		}
+		this.feedback?.setViewportSize(width, height);
 	};
 
 	private readonly handleGesture = (gesture: InputGesture) => {
@@ -273,36 +297,26 @@ export class GameRuntime {
 	}
 
 	private readonly handleInputFeedback = (event: InputFeedbackEvent) => {
-		if (this.disposed || !this.feedback) return;
+		if (this.disposed || !this.feedback || !this.renderer) return;
 
-		this.screenPointToGround(event.start, this.feedbackStartWorld);
-		this.screenPointToGround(event.thumb, this.feedbackThumbWorld);
+		this.clientPointToFeedbackScreen(event.start, this.feedbackStartScreen);
+		this.clientPointToFeedbackScreen(event.thumb, this.feedbackThumbScreen);
 		this.feedback.handlePointerFeedback({
 			event,
-			startWorld: this.feedbackStartWorld,
-			thumbWorld: this.feedbackThumbWorld
+			startScreen: this.feedbackStartScreen,
+			thumbScreen: this.feedbackThumbScreen
 		});
 	};
 
-	private screenPointToGround(point: { x: number; y: number }, target: THREE.Vector3) {
-		if (!this.camera || !this.renderer || !this.player) {
-			return target.set(0, 0, 0);
-		}
-
+	private clientPointToFeedbackScreen(
+		point: { x: number; y: number },
+		target: { x: number; y: number }
+	) {
+		if (!this.renderer) return target;
 		const bounds = this.renderer.domElement.getBoundingClientRect();
-		const width = Math.max(1, bounds.width);
-		const height = Math.max(1, bounds.height);
-		this.feedbackNdc.set(
-			((point.x - bounds.left) / width) * 2 - 1,
-			-(((point.y - bounds.top) / height) * 2 - 1)
-		);
-
-		this.feedbackRaycaster.setFromCamera(this.feedbackNdc, this.camera);
-		if (this.feedbackRaycaster.ray.intersectPlane(this.groundPlane, target)) {
-			return target;
-		}
-
-		return target.copy(this.player.group.position);
+		target.x = point.x - bounds.left;
+		target.y = point.y - bounds.top;
+		return target;
 	}
 
 	private updatePlayer(deltaSeconds: number) {

@@ -186,7 +186,8 @@ export class InputController {
 		}
 
 		const direction = this.directionFromStart(active);
-		const speed = distance / Math.max(1, duration);
+		const dragDuration = event.timeStamp - (active.dragStartTime ?? active.startTime);
+		const speed = distance / Math.max(1, dragDuration);
 		this.releaseActivePointer();
 		this.safeEmitFeedback(releaseFeedback);
 		this.active = null;

@@ -1,11 +1,11 @@
-import type { InputFeedbackEvent, InputGesture } from '$lib/game/types';
+import type { InputFeedbackEvent, InputGesture, ScreenPoint } from '$lib/game/types';
 import * as THREE from 'three';
 import { isThumbPointVisible } from './feedbackPhysics';
 
-export interface WorldInputFeedbackEvent {
+export interface ScreenInputFeedbackEvent {
 	event: InputFeedbackEvent;
-	startWorld: THREE.Vector3;
-	thumbWorld: THREE.Vector3;
+	startScreen: ScreenPoint;
+	thumbScreen: ScreenPoint;
 }
 
 const START_ANCHOR_COLOR = 0xf6d365;
@@ -13,12 +13,14 @@ const THUMB_TARGET_COLOR = 0x7dd3fc;
 const TETHER_COLOR = 0xe0f2fe;
 const DASH_COLOR = 0x93c5fd;
 const ATTACK_COLOR = 0xfff7ad;
-const GROUND_Y = 0.035;
+const WORLD_GROUND_Y = 0.035;
+const SCREEN_Z = 0;
 const THUMB_SPRING_STIFFNESS = 130;
 const THUMB_SPRING_DAMPING = 19;
 
 export class PhysicsFeedbackActor {
 	readonly group = new THREE.Group();
+	readonly worldGroup = new THREE.Group();
 
 	private readonly startAnchor: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
 	private readonly thumbTarget: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
@@ -28,11 +30,13 @@ export class PhysicsFeedbackActor {
 	private readonly attackPulse: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
 	private readonly geometries: THREE.BufferGeometry[] = [];
 	private readonly materials: THREE.Material[] = [];
-	private readonly startWorld = new THREE.Vector3();
-	private readonly thumbTargetWorld = new THREE.Vector3();
-	private readonly thumbVisualWorld = new THREE.Vector3();
+	private readonly startScreen = new THREE.Vector3();
+	private readonly thumbTargetScreen = new THREE.Vector3();
+	private readonly thumbVisualScreen = new THREE.Vector3();
 	private readonly thumbVelocity = new THREE.Vector3();
 	private readonly scratch = new THREE.Vector3();
+	private viewportWidth = 1;
+	private viewportHeight = 1;
 	private active = false;
 	private thumbVisible = false;
 	private runIntensity = 0;
@@ -42,14 +46,15 @@ export class PhysicsFeedbackActor {
 
 	constructor() {
 		this.group.name = 'PhysicsFeedbackActor';
+		this.worldGroup.name = 'PhysicsFeedbackWorldActor';
 
-		this.startAnchor = this.createGroundRing('start-anchor', START_ANCHOR_COLOR, 0.32, 0.42, 0.75);
-		this.thumbTarget = this.createGroundRing('thumb-target', THUMB_TARGET_COLOR, 0.24, 0.34, 0.72);
-		this.runHalo = this.createGroundRing('run-halo', TETHER_COLOR, 0.52, 0.58, 0.36);
+		this.startAnchor = this.createScreenRing('start-anchor', START_ANCHOR_COLOR, 24, 34, 0.75);
+		this.thumbTarget = this.createScreenRing('thumb-target', THUMB_TARGET_COLOR, 18, 28, 0.72);
+		this.runHalo = this.createScreenRing('run-halo', TETHER_COLOR, 42, 50, 0.36);
 		this.dashWave = this.createGroundRing('dash-wave', DASH_COLOR, 0.34, 0.42, 0);
 		this.attackPulse = this.createGroundRing('attack-pulse', ATTACK_COLOR, 0.42, 0.5, 0);
 
-		const tetherGeometry = this.trackGeometry(new THREE.PlaneGeometry(1, 0.075));
+		const tetherGeometry = this.trackGeometry(new THREE.PlaneGeometry(1, 7));
 		const tetherMaterial = this.trackMaterial(
 			new THREE.MeshBasicMaterial({
 				color: TETHER_COLOR,
@@ -61,7 +66,6 @@ export class PhysicsFeedbackActor {
 		);
 		this.tether = new THREE.Mesh(tetherGeometry, tetherMaterial);
 		this.tether.name = 'feedback-tether';
-		this.tether.rotation.x = -Math.PI / 2;
 		this.tether.visible = false;
 		this.group.add(this.tether);
 
@@ -75,19 +79,24 @@ export class PhysicsFeedbackActor {
 		this.attackPulse.scale.setScalar(0);
 	}
 
-	handlePointerFeedback({ event, startWorld, thumbWorld }: WorldInputFeedbackEvent) {
-		this.startWorld.copy(startWorld);
-		this.thumbTargetWorld.copy(thumbWorld);
+	setViewportSize(width: number, height: number) {
+		this.viewportWidth = Math.max(1, width);
+		this.viewportHeight = Math.max(1, height);
+	}
+
+	handlePointerFeedback({ event, startScreen, thumbScreen }: ScreenInputFeedbackEvent) {
+		this.screenPointToLayer(startScreen, this.startScreen);
+		this.screenPointToLayer(thumbScreen, this.thumbTargetScreen);
 
 		if (event.type === 'press') {
 			this.active = true;
 			this.thumbVisible = false;
 			this.resetRunHalo();
-			this.thumbVisualWorld.copy(thumbWorld);
+			this.thumbVisualScreen.copy(this.thumbTargetScreen);
 			this.thumbVelocity.set(0, 0, 0);
 			this.startAnchor.visible = true;
 			this.startAnchor.scale.setScalar(0.72);
-			this.placeGroundObject(this.startAnchor, this.startWorld);
+			this.placeScreenObject(this.startAnchor, this.startScreen);
 			this.hideThumbAndTether();
 			return;
 		}
@@ -97,7 +106,7 @@ export class PhysicsFeedbackActor {
 			this.thumbVisible = isThumbPointVisible(event.start, event.thumb);
 			this.runIntensity = event.mode === 'run' ? 1 : 0.35;
 			this.startAnchor.visible = true;
-			this.placeGroundObject(this.startAnchor, this.startWorld);
+			this.placeScreenObject(this.startAnchor, this.startScreen);
 			return;
 		}
 
@@ -147,6 +156,8 @@ export class PhysicsFeedbackActor {
 	dispose() {
 		this.group.removeFromParent();
 		this.group.clear();
+		this.worldGroup.removeFromParent();
+		this.worldGroup.clear();
 
 		for (const geometry of this.geometries) geometry.dispose();
 		for (const material of this.materials) material.dispose();
@@ -176,8 +187,13 @@ export class PhysicsFeedbackActor {
 			return;
 		}
 
-		this.springVector(this.thumbVisualWorld, this.thumbTargetWorld, this.thumbVelocity, deltaSeconds);
-		this.placeGroundObject(this.thumbTarget, this.thumbVisualWorld);
+		this.springVector(
+			this.thumbVisualScreen,
+			this.thumbTargetScreen,
+			this.thumbVelocity,
+			deltaSeconds
+		);
+		this.placeScreenObject(this.thumbTarget, this.thumbVisualScreen);
 		this.thumbTarget.visible = true;
 		this.thumbTarget.material.opacity = THREE.MathUtils.damp(
 			this.thumbTarget.material.opacity,
@@ -193,8 +209,8 @@ export class PhysicsFeedbackActor {
 			return;
 		}
 
-		this.scratch.copy(this.thumbVisualWorld).sub(this.startWorld);
-		const length = Math.hypot(this.scratch.x, this.scratch.z);
+		this.scratch.copy(this.thumbVisualScreen).sub(this.startScreen);
+		const length = Math.hypot(this.scratch.x, this.scratch.y);
 		if (length < 0.08) {
 			this.tether.visible = false;
 			return;
@@ -202,12 +218,12 @@ export class PhysicsFeedbackActor {
 
 		this.tether.visible = true;
 		this.tether.position.set(
-			(this.startWorld.x + this.thumbVisualWorld.x) * 0.5,
-			GROUND_Y + 0.012,
-			(this.startWorld.z + this.thumbVisualWorld.z) * 0.5
+			(this.startScreen.x + this.thumbVisualScreen.x) * 0.5,
+			(this.startScreen.y + this.thumbVisualScreen.y) * 0.5,
+			SCREEN_Z
 		);
 		this.tether.scale.set(length, 1, 1);
-		this.tether.rotation.z = -Math.atan2(this.scratch.z, this.scratch.x);
+		this.tether.rotation.z = Math.atan2(this.scratch.y, this.scratch.x);
 		this.tether.material.opacity = THREE.MathUtils.clamp(length / 2.5, 0.18, 0.62);
 	}
 
@@ -219,7 +235,7 @@ export class PhysicsFeedbackActor {
 		this.runHalo.scale.setScalar(next);
 		this.runHalo.visible = next > 0.05;
 		this.runHalo.material.opacity = THREE.MathUtils.clamp(next * 0.42, 0, 0.42);
-		this.placeGroundObject(this.runHalo, this.startWorld);
+		this.placeScreenObject(this.runHalo, this.startScreen);
 	}
 
 	private updateDashWave(deltaSeconds: number) {
@@ -251,12 +267,12 @@ export class PhysicsFeedbackActor {
 		velocity.x +=
 			((target.x - current.x) * THUMB_SPRING_STIFFNESS - velocity.x * THUMB_SPRING_DAMPING) *
 			deltaSeconds;
-		velocity.z +=
-			((target.z - current.z) * THUMB_SPRING_STIFFNESS - velocity.z * THUMB_SPRING_DAMPING) *
+		velocity.y +=
+			((target.y - current.y) * THUMB_SPRING_STIFFNESS - velocity.y * THUMB_SPRING_DAMPING) *
 			deltaSeconds;
 		current.x += velocity.x * deltaSeconds;
-		current.z += velocity.z * deltaSeconds;
-		current.y = GROUND_Y;
+		current.y += velocity.y * deltaSeconds;
+		current.z = SCREEN_Z;
 	}
 
 	private resetRunHalo() {
@@ -272,7 +288,36 @@ export class PhysicsFeedbackActor {
 		this.tether.visible = false;
 	}
 
-	private createGroundRing(name: string, color: number, innerRadius: number, outerRadius: number, opacity: number) {
+	private createScreenRing(
+		name: string,
+		color: number,
+		innerRadius: number,
+		outerRadius: number,
+		opacity: number
+	) {
+		const geometry = this.trackGeometry(new THREE.RingGeometry(innerRadius, outerRadius, 48));
+		const material = this.trackMaterial(
+			new THREE.MeshBasicMaterial({
+				color,
+				opacity,
+				transparent: true,
+				depthWrite: false,
+				side: THREE.DoubleSide
+			})
+		);
+		const mesh = new THREE.Mesh(geometry, material);
+		mesh.name = name;
+		this.group.add(mesh);
+		return mesh;
+	}
+
+	private createGroundRing(
+		name: string,
+		color: number,
+		innerRadius: number,
+		outerRadius: number,
+		opacity: number
+	) {
 		const geometry = this.trackGeometry(new THREE.RingGeometry(innerRadius, outerRadius, 48));
 		const material = this.trackMaterial(
 			new THREE.MeshBasicMaterial({
@@ -286,12 +331,20 @@ export class PhysicsFeedbackActor {
 		const mesh = new THREE.Mesh(geometry, material);
 		mesh.name = name;
 		mesh.rotation.x = -Math.PI / 2;
-		this.group.add(mesh);
+		this.worldGroup.add(mesh);
 		return mesh;
 	}
 
+	private screenPointToLayer(point: ScreenPoint, target: THREE.Vector3) {
+		return target.set(point.x - this.viewportWidth * 0.5, this.viewportHeight * 0.5 - point.y, SCREEN_Z);
+	}
+
+	private placeScreenObject(object: THREE.Object3D, position: THREE.Vector3) {
+		object.position.set(position.x, position.y, SCREEN_Z);
+	}
+
 	private placeGroundObject(object: THREE.Object3D, position: THREE.Vector3) {
-		object.position.set(position.x, GROUND_Y, position.z);
+		object.position.set(position.x, WORLD_GROUND_Y, position.z);
 	}
 
 	private trackGeometry<T extends THREE.BufferGeometry>(geometry: T) {
