@@ -280,6 +280,10 @@ export class GameRuntime {
 			return;
 		}
 
+		if (gesture.type === 'skill') {
+			return;
+		}
+
 		this.movementMode = null;
 		if (this.dashRemainingSeconds <= 0 && this.attackRemainingSeconds <= 0) {
 			this.publishAction(IDLE_ACTION);
@@ -299,11 +303,27 @@ export class GameRuntime {
 	private readonly handleInputFeedback = (event: InputFeedbackEvent) => {
 		if (this.disposed || !this.feedback || !this.renderer) return;
 
-		if (event.type === 'skill-buttons' || event.type === 'skill-buttons-hidden') {
+		if (event.type === 'skill-buttons-hidden') {
 			this.feedback.handlePointerFeedback({
 				event,
-				startScreen: this.feedbackStartScreen,
-				thumbScreen: this.feedbackThumbScreen
+				startScreen: { x: 0, y: 0 },
+				thumbScreen: { x: 0, y: 0 }
+			});
+			return;
+		}
+
+		if (event.type === 'skill-buttons') {
+			this.feedback.handlePointerFeedback({
+				event: {
+					type: 'skill-buttons',
+					buttons: event.buttons.map((button) => ({
+						...button,
+						center: this.clientPointToFeedbackScreen(button.center, { x: 0, y: 0 })
+					})),
+					timeStamp: event.timeStamp
+				},
+				startScreen: { x: 0, y: 0 },
+				thumbScreen: { x: 0, y: 0 }
 			});
 			return;
 		}

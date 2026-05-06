@@ -4,6 +4,17 @@ import { InputController, type PointerSurface } from './InputController';
 
 type Listener = (event: PointerEvent) => void;
 type ListenerMap = Record<string, Listener[]>;
+type CoreInputFeedbackEvent = Extract<
+	InputFeedbackEvent,
+	{ type: 'press' | 'drag' | 'release' | 'cancel' }
+>;
+
+const CORE_FEEDBACK_TYPES = new Set<InputFeedbackEvent['type']>([
+	'press',
+	'drag',
+	'release',
+	'cancel'
+]);
 
 class FakePointerSurface implements PointerSurface {
 	readonly listeners: ListenerMap = {};
@@ -65,18 +76,26 @@ function setup() {
 	return { target, gestures, feedback, controller };
 }
 
+function coreFeedback(feedback: InputFeedbackEvent[]): CoreInputFeedbackEvent[] {
+	return feedback.filter((event): event is CoreInputFeedbackEvent =>
+		CORE_FEEDBACK_TYPES.has(event.type)
+	);
+}
+
 describe('InputController', () => {
 	it('emits press feedback with the fixed start point and initial thumb point', () => {
 		const { target, feedback } = setup();
 
 		target.fire('pointerdown', { pointerId: 1, clientX: 40, clientY: 60, timeStamp: 12 });
 
-		expect(feedback.find((event) => event.type === 'press')).toEqual({
-			type: 'press',
-			start: { x: 40, y: 60 },
-			thumb: { x: 40, y: 60 },
-			timeStamp: 12
-		});
+		expect(coreFeedback(feedback)).toEqual([
+			{
+				type: 'press',
+				start: { x: 40, y: 60 },
+				thumb: { x: 40, y: 60 },
+				timeStamp: 12
+			}
+		]);
 	});
 
 	it('emits drag feedback with fixed start and moving thumb points', () => {
@@ -85,23 +104,25 @@ describe('InputController', () => {
 		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 100, timeStamp: 0 });
 		target.fire('pointermove', { pointerId: 1, clientX: 120, clientY: 86, timeStamp: 60 });
 
-		expect(feedback.find((event) => event.type === 'press')).toEqual({
-			type: 'press',
-			start: { x: 100, y: 100 },
-			thumb: { x: 100, y: 100 },
-			timeStamp: 0
-		});
-		expect(feedback.find((event) => event.type === 'drag')).toEqual({
-			type: 'drag',
-			start: { x: 100, y: 100 },
-			thumb: { x: 120, y: 86 },
-			direction: expect.objectContaining({
-				x: expect.closeTo(0.8192319205190405, 10),
-				y: expect.closeTo(0.5734623443633283, 10)
-			}),
-			mode: 'walk',
-			timeStamp: 60
-		});
+		expect(coreFeedback(feedback)).toEqual([
+			{
+				type: 'press',
+				start: { x: 100, y: 100 },
+				thumb: { x: 100, y: 100 },
+				timeStamp: 0
+			},
+			{
+				type: 'drag',
+				start: { x: 100, y: 100 },
+				thumb: { x: 120, y: 86 },
+				direction: expect.objectContaining({
+					x: expect.closeTo(0.8192319205190405, 10),
+					y: expect.closeTo(0.5734623443633283, 10)
+				}),
+				mode: 'walk',
+				timeStamp: 60
+			}
+		]);
 	});
 
 	it('emits release feedback even when the thumb point never leaves the start point', () => {
@@ -110,19 +131,21 @@ describe('InputController', () => {
 		target.fire('pointerdown', { pointerId: 1, clientX: 24, clientY: 36, timeStamp: 0 });
 		target.fire('pointerup', { pointerId: 1, clientX: 24, clientY: 36, timeStamp: 80 });
 
-		expect(feedback.find((event) => event.type === 'press')).toEqual({
-			type: 'press',
-			start: { x: 24, y: 36 },
-			thumb: { x: 24, y: 36 },
-			timeStamp: 0
-		});
-		expect(feedback.find((event) => event.type === 'release')).toEqual({
-			type: 'release',
-			start: { x: 24, y: 36 },
-			thumb: { x: 24, y: 36 },
-			wasDragging: false,
-			timeStamp: 80
-		});
+		expect(coreFeedback(feedback)).toEqual([
+			{
+				type: 'press',
+				start: { x: 24, y: 36 },
+				thumb: { x: 24, y: 36 },
+				timeStamp: 0
+			},
+			{
+				type: 'release',
+				start: { x: 24, y: 36 },
+				thumb: { x: 24, y: 36 },
+				wasDragging: false,
+				timeStamp: 80
+			}
+		]);
 	});
 
 	it('emits cancel feedback for active drag cleanup', () => {
@@ -132,13 +155,29 @@ describe('InputController', () => {
 		target.fire('pointermove', { pointerId: 4, clientX: 40, clientY: 20, timeStamp: 30 });
 		target.fire('pointercancel', { pointerId: 4, clientX: 40, clientY: 20, timeStamp: 40 });
 
-		expect(feedback.find((event) => event.type === 'cancel')).toEqual({
-			type: 'cancel',
-			start: { x: 10, y: 20 },
-			thumb: { x: 40, y: 20 },
-			wasDragging: true,
-			timeStamp: 40
-		});
+		expect(coreFeedback(feedback)).toEqual([
+			{
+				type: 'press',
+				start: { x: 10, y: 20 },
+				thumb: { x: 10, y: 20 },
+				timeStamp: 0
+			},
+			{
+				type: 'drag',
+				start: { x: 10, y: 20 },
+				thumb: { x: 40, y: 20 },
+				direction: { x: 1, y: 0 },
+				mode: 'walk',
+				timeStamp: 30
+			},
+			{
+				type: 'cancel',
+				start: { x: 10, y: 20 },
+				thumb: { x: 40, y: 20 },
+				wasDragging: true,
+				timeStamp: 40
+			}
+		]);
 	});
 
 	it('does not emit feedback for ignored secondary pointers', () => {
@@ -149,7 +188,7 @@ describe('InputController', () => {
 		target.fire('pointermove', { pointerId: 2, clientX: 120, clientY: 80, timeStamp: 20 });
 		target.fire('pointerup', { pointerId: 2, clientX: 120, clientY: 80, timeStamp: 30 });
 
-		expect(feedback.filter((event) => event.type === 'press')).toEqual([
+		expect(coreFeedback(feedback)).toEqual([
 			{
 				type: 'press',
 				start: { x: 0, y: 0 },
@@ -157,6 +196,7 @@ describe('InputController', () => {
 				timeStamp: 0
 			}
 		]);
+		expect(feedback.filter((event) => event.type === 'skill-buttons')).toHaveLength(1);
 	});
 
 	it('isolates feedback handler errors from gesture emission and cleanup', () => {
@@ -190,13 +230,29 @@ describe('InputController', () => {
 		target.fire('pointermove', { pointerId: 3, clientX: 40, clientY: 20, timeStamp: 30 });
 		target.fire('pointercancel', { pointerId: 3, clientX: 70, clientY: 90, timeStamp: 40 });
 
-		expect(feedback.find((event) => event.type === 'cancel')).toEqual({
-			type: 'cancel',
-			start: { x: 10, y: 20 },
-			thumb: { x: 70, y: 90 },
-			wasDragging: true,
-			timeStamp: 40
-		});
+		expect(coreFeedback(feedback)).toEqual([
+			{
+				type: 'press',
+				start: { x: 10, y: 20 },
+				thumb: { x: 10, y: 20 },
+				timeStamp: 0
+			},
+			{
+				type: 'drag',
+				start: { x: 10, y: 20 },
+				thumb: { x: 40, y: 20 },
+				direction: { x: 1, y: 0 },
+				mode: 'walk',
+				timeStamp: 30
+			},
+			{
+				type: 'cancel',
+				start: { x: 10, y: 20 },
+				thumb: { x: 70, y: 90 },
+				wasDragging: true,
+				timeStamp: 40
+			}
+		]);
 	});
 
 	it('emits lost capture feedback with the lost capture event thumb point', () => {
@@ -206,13 +262,29 @@ describe('InputController', () => {
 		target.fire('pointermove', { pointerId: 5, clientX: 40, clientY: 20, timeStamp: 30 });
 		target.fire('lostpointercapture', { pointerId: 5, clientX: 72, clientY: 96, timeStamp: 40 });
 
-		expect(feedback.find((event) => event.type === 'cancel')).toEqual({
-			type: 'cancel',
-			start: { x: 10, y: 20 },
-			thumb: { x: 72, y: 96 },
-			wasDragging: true,
-			timeStamp: 40
-		});
+		expect(coreFeedback(feedback)).toEqual([
+			{
+				type: 'press',
+				start: { x: 10, y: 20 },
+				thumb: { x: 10, y: 20 },
+				timeStamp: 0
+			},
+			{
+				type: 'drag',
+				start: { x: 10, y: 20 },
+				thumb: { x: 40, y: 20 },
+				direction: { x: 1, y: 0 },
+				mode: 'walk',
+				timeStamp: 30
+			},
+			{
+				type: 'cancel',
+				start: { x: 10, y: 20 },
+				thumb: { x: 72, y: 96 },
+				wasDragging: true,
+				timeStamp: 40
+			}
+		]);
 	});
 
 	it('recognizes taps and cycles attack combo steps', () => {
