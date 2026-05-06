@@ -71,14 +71,12 @@ describe('InputController', () => {
 
 		target.fire('pointerdown', { pointerId: 1, clientX: 40, clientY: 60, timeStamp: 12 });
 
-		expect(feedback).toEqual([
-			{
-				type: 'press',
-				start: { x: 40, y: 60 },
-				thumb: { x: 40, y: 60 },
-				timeStamp: 12
-			}
-		]);
+		expect(feedback.find((event) => event.type === 'press')).toEqual({
+			type: 'press',
+			start: { x: 40, y: 60 },
+			thumb: { x: 40, y: 60 },
+			timeStamp: 12
+		});
 	});
 
 	it('emits drag feedback with fixed start and moving thumb points', () => {
@@ -87,25 +85,23 @@ describe('InputController', () => {
 		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 100, timeStamp: 0 });
 		target.fire('pointermove', { pointerId: 1, clientX: 120, clientY: 86, timeStamp: 60 });
 
-		expect(feedback).toEqual([
-			{
-				type: 'press',
-				start: { x: 100, y: 100 },
-				thumb: { x: 100, y: 100 },
-				timeStamp: 0
-			},
-			{
-				type: 'drag',
-				start: { x: 100, y: 100 },
-				thumb: { x: 120, y: 86 },
-				direction: expect.objectContaining({
-					x: expect.closeTo(0.8192319205190405, 10),
-					y: expect.closeTo(0.5734623443633283, 10)
-				}),
-				mode: 'walk',
-				timeStamp: 60
-			}
-		]);
+		expect(feedback.find((event) => event.type === 'press')).toEqual({
+			type: 'press',
+			start: { x: 100, y: 100 },
+			thumb: { x: 100, y: 100 },
+			timeStamp: 0
+		});
+		expect(feedback.find((event) => event.type === 'drag')).toEqual({
+			type: 'drag',
+			start: { x: 100, y: 100 },
+			thumb: { x: 120, y: 86 },
+			direction: expect.objectContaining({
+				x: expect.closeTo(0.8192319205190405, 10),
+				y: expect.closeTo(0.5734623443633283, 10)
+			}),
+			mode: 'walk',
+			timeStamp: 60
+		});
 	});
 
 	it('emits release feedback even when the thumb point never leaves the start point', () => {
@@ -114,21 +110,19 @@ describe('InputController', () => {
 		target.fire('pointerdown', { pointerId: 1, clientX: 24, clientY: 36, timeStamp: 0 });
 		target.fire('pointerup', { pointerId: 1, clientX: 24, clientY: 36, timeStamp: 80 });
 
-		expect(feedback).toEqual([
-			{
-				type: 'press',
-				start: { x: 24, y: 36 },
-				thumb: { x: 24, y: 36 },
-				timeStamp: 0
-			},
-			{
-				type: 'release',
-				start: { x: 24, y: 36 },
-				thumb: { x: 24, y: 36 },
-				wasDragging: false,
-				timeStamp: 80
-			}
-		]);
+		expect(feedback.find((event) => event.type === 'press')).toEqual({
+			type: 'press',
+			start: { x: 24, y: 36 },
+			thumb: { x: 24, y: 36 },
+			timeStamp: 0
+		});
+		expect(feedback.find((event) => event.type === 'release')).toEqual({
+			type: 'release',
+			start: { x: 24, y: 36 },
+			thumb: { x: 24, y: 36 },
+			wasDragging: false,
+			timeStamp: 80
+		});
 	});
 
 	it('emits cancel feedback for active drag cleanup', () => {
@@ -138,7 +132,7 @@ describe('InputController', () => {
 		target.fire('pointermove', { pointerId: 4, clientX: 40, clientY: 20, timeStamp: 30 });
 		target.fire('pointercancel', { pointerId: 4, clientX: 40, clientY: 20, timeStamp: 40 });
 
-		expect(feedback.at(-1)).toEqual({
+		expect(feedback.find((event) => event.type === 'cancel')).toEqual({
 			type: 'cancel',
 			start: { x: 10, y: 20 },
 			thumb: { x: 40, y: 20 },
@@ -155,7 +149,7 @@ describe('InputController', () => {
 		target.fire('pointermove', { pointerId: 2, clientX: 120, clientY: 80, timeStamp: 20 });
 		target.fire('pointerup', { pointerId: 2, clientX: 120, clientY: 80, timeStamp: 30 });
 
-		expect(feedback).toEqual([
+		expect(feedback.filter((event) => event.type === 'press')).toEqual([
 			{
 				type: 'press',
 				start: { x: 0, y: 0 },
@@ -196,7 +190,7 @@ describe('InputController', () => {
 		target.fire('pointermove', { pointerId: 3, clientX: 40, clientY: 20, timeStamp: 30 });
 		target.fire('pointercancel', { pointerId: 3, clientX: 70, clientY: 90, timeStamp: 40 });
 
-		expect(feedback.at(-1)).toEqual({
+		expect(feedback.find((event) => event.type === 'cancel')).toEqual({
 			type: 'cancel',
 			start: { x: 10, y: 20 },
 			thumb: { x: 70, y: 90 },
@@ -212,7 +206,7 @@ describe('InputController', () => {
 		target.fire('pointermove', { pointerId: 5, clientX: 40, clientY: 20, timeStamp: 30 });
 		target.fire('lostpointercapture', { pointerId: 5, clientX: 72, clientY: 96, timeStamp: 40 });
 
-		expect(feedback.at(-1)).toEqual({
+		expect(feedback.find((event) => event.type === 'cancel')).toEqual({
 			type: 'cancel',
 			start: { x: 10, y: 20 },
 			thumb: { x: 72, y: 96 },
@@ -388,6 +382,106 @@ describe('InputController', () => {
 			{ type: 'move', mode: 'walk', direction: { x: 0, y: 1 } },
 			{ type: 'idle' }
 		]);
+	});
+
+	it('shows fixed diagonal skill buttons on press outside the run threshold', () => {
+		const { target, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 120, timeStamp: 5 });
+
+		expect(feedback.at(0)).toEqual({
+			type: 'press',
+			start: { x: 100, y: 120 },
+			thumb: { x: 100, y: 120 },
+			timeStamp: 5
+		});
+		expect(feedback.at(1)).toEqual({
+			type: 'skill-buttons',
+			buttons: [
+				{ slot: 1, center: { x: 212, y: 8 }, radius: 24 },
+				{ slot: 2, center: { x: -12, y: 8 }, radius: 24 },
+				{ slot: 3, center: { x: 212, y: 232 }, radius: 24 },
+				{ slot: 4, center: { x: -12, y: 232 }, radius: 24 }
+			],
+			timeStamp: 5
+		});
+
+		const skillButtons = feedback.at(1);
+		expect(skillButtons?.type).toBe('skill-buttons');
+		if (skillButtons?.type === 'skill-buttons') {
+			for (const button of skillButtons.buttons) {
+				const distance = Math.hypot(button.center.x - 100, button.center.y - 120);
+				expect(distance - button.radius).toBeGreaterThan(72);
+			}
+		}
+	});
+
+	it('emits one skill gesture and hides skill buttons when the thumb enters a slot', () => {
+		const { target, gestures, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 120, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 212, clientY: 8, timeStamp: 100 });
+		target.fire('pointermove', { pointerId: 1, clientX: 210, clientY: 10, timeStamp: 120 });
+
+		expect(gestures).toEqual([
+			{
+				type: 'move',
+				mode: 'run',
+				direction: {
+					x: expect.closeTo(0.7071067811865475, 10),
+					y: expect.closeTo(0.7071067811865475, 10)
+				}
+			},
+			{ type: 'skill', slot: 1 },
+			{
+				type: 'move',
+				mode: 'run',
+				direction: {
+					x: expect.closeTo(0.7071067811865475, 10),
+					y: expect.closeTo(0.7071067811865475, 10)
+				}
+			}
+		]);
+		expect(feedback.at(-1)).toEqual({
+			type: 'drag',
+			start: { x: 100, y: 120 },
+			thumb: { x: 210, y: 10 },
+			direction: {
+				x: expect.closeTo(0.7071067811865475, 10),
+				y: expect.closeTo(0.7071067811865475, 10)
+			},
+			mode: 'run',
+			timeStamp: 120
+		});
+		expect(feedback).toContainEqual({ type: 'skill-buttons-hidden', timeStamp: 100 });
+		expect(feedback.filter((event) => event.type === 'skill-buttons-hidden')).toHaveLength(1);
+	});
+
+	it('allows different slots once each during a single touch but never repeats a slot', () => {
+		const { target, gestures } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 120, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 212, clientY: 8, timeStamp: 100 });
+		target.fire('pointermove', { pointerId: 1, clientX: 100, clientY: 120, timeStamp: 140 });
+		target.fire('pointermove', { pointerId: 1, clientX: 212, clientY: 8, timeStamp: 180 });
+		target.fire('pointermove', { pointerId: 1, clientX: -12, clientY: 8, timeStamp: 220 });
+
+		expect(gestures.filter((gesture) => gesture.type === 'skill')).toEqual([
+			{ type: 'skill', slot: 1 },
+			{ type: 'skill', slot: 2 }
+		]);
+	});
+
+	it('does not trigger skills from release-only swipes or ignored secondary pointers', () => {
+		const { target, gestures, feedback } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 120, timeStamp: 0 });
+		target.fire('pointerdown', { pointerId: 2, clientX: 100, clientY: 120, timeStamp: 10 });
+		target.fire('pointermove', { pointerId: 2, clientX: 212, clientY: 8, timeStamp: 40 });
+		target.fire('pointerup', { pointerId: 1, clientX: 212, clientY: 8, timeStamp: 80 });
+
+		expect(gestures).toEqual([{ type: 'idle' }]);
+		expect(feedback.filter((event) => event.type === 'skill-buttons-hidden')).toHaveLength(1);
 	});
 
 	it('dispose releases active capture, removes listeners, and suppresses later emissions', () => {

@@ -299,6 +299,15 @@ export class GameRuntime {
 	private readonly handleInputFeedback = (event: InputFeedbackEvent) => {
 		if (this.disposed || !this.feedback || !this.renderer) return;
 
+		if (event.type === 'skill-buttons' || event.type === 'skill-buttons-hidden') {
+			this.feedback.handlePointerFeedback({
+				event,
+				startScreen: this.feedbackStartScreen,
+				thumbScreen: this.feedbackThumbScreen
+			});
+			return;
+		}
+
 		this.clientPointToFeedbackScreen(event.start, this.feedbackStartScreen);
 		this.clientPointToFeedbackScreen(event.thumb, this.feedbackThumbScreen);
 		this.feedback.handlePointerFeedback({
