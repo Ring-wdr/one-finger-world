@@ -104,7 +104,7 @@ describe('GameRuntime', () => {
 		runtime.dispose();
 	});
 
-	it('converts skill button centers from client coordinates to feedback screen coordinates', async () => {
+	it('converts skill button centers without resetting cached feedback coordinates', async () => {
 		const { GameRuntime } = await import('./GameRuntime');
 		const pointerFeedback: ScreenInputFeedbackEvent[] = [];
 		const runtime = new GameRuntime({
@@ -115,11 +115,17 @@ describe('GameRuntime', () => {
 		const internals = runtime as unknown as RuntimeInternals;
 		internals.renderer.domElement.bounds = { left: 20, top: 30 };
 		internals.feedback = {
-			handlePointerFeedback: (event) => pointerFeedback.push(event),
+			handlePointerFeedback: (event) => pointerFeedback.push(clonePointerFeedback(event)),
 			handleGesture: () => undefined,
 			dispose: () => undefined
 		};
 
+		internals.handleInputFeedback({
+			type: 'press',
+			start: { x: 42, y: 52 },
+			thumb: { x: 62, y: 72 },
+			timeStamp: 0
+		});
 		internals.handleInputFeedback({
 			type: 'skill-buttons',
 			buttons: [
@@ -133,6 +139,16 @@ describe('GameRuntime', () => {
 		expect(pointerFeedback).toEqual([
 			{
 				event: {
+					type: 'press',
+					start: { x: 42, y: 52 },
+					thumb: { x: 62, y: 72 },
+					timeStamp: 0
+				},
+				startScreen: { x: 22, y: 22 },
+				thumbScreen: { x: 42, y: 42 }
+			},
+			{
+				event: {
 					type: 'skill-buttons',
 					buttons: [
 						{ slot: 1, center: { x: 112, y: 112 }, radius: 24 },
@@ -140,13 +156,13 @@ describe('GameRuntime', () => {
 					],
 					timeStamp: 10
 				},
-				startScreen: { x: 0, y: 0 },
-				thumbScreen: { x: 0, y: 0 }
+				startScreen: { x: 22, y: 22 },
+				thumbScreen: { x: 42, y: 42 }
 			},
 			{
 				event: { type: 'skill-buttons-hidden', timeStamp: 20 },
-				startScreen: { x: 0, y: 0 },
-				thumbScreen: { x: 0, y: 0 }
+				startScreen: { x: 22, y: 22 },
+				thumbScreen: { x: 42, y: 42 }
 			}
 		]);
 
@@ -162,4 +178,12 @@ function createContainer() {
 		removeChild: vi.fn(),
 		getBoundingClientRect: () => ({ width: 320, height: 240 })
 	} as unknown as HTMLElement;
+}
+
+function clonePointerFeedback(event: ScreenInputFeedbackEvent): ScreenInputFeedbackEvent {
+	return {
+		event: structuredClone(event.event),
+		startScreen: { ...event.startScreen },
+		thumbScreen: { ...event.thumbScreen }
+	};
 }

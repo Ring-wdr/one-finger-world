@@ -306,8 +306,8 @@ export class GameRuntime {
 		if (event.type === 'skill-buttons-hidden') {
 			this.feedback.handlePointerFeedback({
 				event,
-				startScreen: { x: 0, y: 0 },
-				thumbScreen: { x: 0, y: 0 }
+				startScreen: this.feedbackStartScreen,
+				thumbScreen: this.feedbackThumbScreen
 			});
 			return;
 		}
@@ -322,8 +322,8 @@ export class GameRuntime {
 					})),
 					timeStamp: event.timeStamp
 				},
-				startScreen: { x: 0, y: 0 },
-				thumbScreen: { x: 0, y: 0 }
+				startScreen: this.feedbackStartScreen,
+				thumbScreen: this.feedbackThumbScreen
 			});
 			return;
 		}
