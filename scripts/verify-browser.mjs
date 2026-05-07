@@ -117,6 +117,7 @@ async function verifyViewport(browser, viewport) {
 			await input.endDrag();
 		}
 
+		await page.waitForTimeout(360);
 		const skillStart = {
 			x: viewport.width / 2,
 			y: viewport.height * 0.58
@@ -125,20 +126,25 @@ async function verifyViewport(browser, viewport) {
 			x: skillStart.x + 112,
 			y: skillStart.y - 112
 		};
-		const beforeSkillSignature = await canvasRegionSignature(page, center, 128);
+		const beforeSkillBeamPixels = await countBeamLikePixels(page, center, 128);
 		await input.startDrag(skillStart.x, skillStart.y, skillTarget.x, skillTarget.y);
 		try {
-			await waitForBodyTextMatch(page, /Walk|Run/);
-			await page.waitForTimeout(180);
-			const duringSkillSignature = await canvasRegionSignature(page, center, 128);
-			assert.notEqual(
-				duringSkillSignature,
-				beforeSkillSignature,
-				`${viewport.name} skill beam should alter the canvas near the player while movement continues`
+			await waitForHudLabelMatch(page, /Walk|Run/);
+			await page.waitForTimeout(420);
+			assert.match(
+				await getHudLabel(page),
+				/Walk|Run/,
+				`${viewport.name} skill beam should keep movement HUD active`
 			);
 		} finally {
 			await input.endDrag();
 		}
+		await page.waitForTimeout(360);
+		const afterSkillBeamPixels = await countBeamLikePixels(page, center, 128);
+		assert.ok(
+			afterSkillBeamPixels >= beforeSkillBeamPixels + 20 || afterSkillBeamPixels >= 32,
+			`${viewport.name} skill beam should add beam-colored pixels near the player`
+		);
 
 		await input.fastDrag(center.x, center.y, center.x + 110, center.y);
 		await input.fastDrag(center.x, center.y, center.x + 110, center.y);
@@ -382,6 +388,51 @@ async function canvasRegionSignature(page, point, radius = 96) {
 	}, { point, radius });
 }
 
+async function countBeamLikePixels(page, point, radius = 96) {
+	return page.locator('canvas').first().evaluate((canvas, { point, radius }) => {
+		if (!(canvas instanceof HTMLCanvasElement)) return 0;
+
+		const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+		if (!gl) return 0;
+
+		const width = gl.drawingBufferWidth;
+		const height = gl.drawingBufferHeight;
+		if (width <= 0 || height <= 0) return 0;
+
+		const bounds = canvas.getBoundingClientRect();
+		if (bounds.width <= 0 || bounds.height <= 0) return 0;
+
+		const scaleX = width / bounds.width;
+		const scaleY = height / bounds.height;
+		const centerX = Math.round((point.x - bounds.left) * scaleX);
+		const centerY = Math.round(height - (point.y - bounds.top) * scaleY);
+		const bufferRadius = Math.round(radius * Math.max(scaleX, scaleY));
+		const minX = Math.max(0, centerX - bufferRadius);
+		const maxX = Math.min(width - 1, centerX + bufferRadius);
+		const minY = Math.max(0, centerY - bufferRadius);
+		const maxY = Math.min(height - 1, centerY + bufferRadius);
+		const stride = Math.max(1, Math.round(4 * Math.max(scaleX, scaleY)));
+		const pixel = new Uint8Array(4);
+		let count = 0;
+
+		for (let y = minY; y <= maxY; y += stride) {
+			for (let x = minX; x <= maxX; x += stride) {
+				gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+				if (
+					pixel[1] >= 140 &&
+					pixel[2] >= 170 &&
+					pixel[2] >= pixel[0] &&
+					pixel[1] >= pixel[0] * 0.78
+				) {
+					count += 1;
+				}
+			}
+		}
+
+		return count;
+	}, { point, radius });
+}
+
 async function waitForBodyText(page, text) {
 	await page.waitForFunction(
 		(expectedText) => document.body.textContent?.includes(expectedText) === true,
@@ -394,6 +445,21 @@ async function waitForBodyTextMatch(page, pattern) {
 		(patternSource) => new RegExp(patternSource).test(document.body.textContent ?? ''),
 		pattern.source
 	);
+}
+
+async function waitForHudLabelMatch(page, pattern) {
+	await page.locator('.hud strong').waitFor({ state: 'visible' });
+	await page.waitForFunction(
+		(patternSource) => {
+			const label = document.querySelector('.hud strong')?.textContent ?? '';
+			return new RegExp(patternSource).test(label);
+		},
+		pattern.source
+	);
+}
+
+async function getHudLabel(page) {
+	return (await page.locator('.hud strong').textContent()) ?? '';
 }
 
 async function startLocalDevServer() {
