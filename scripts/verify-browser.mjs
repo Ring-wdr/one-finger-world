@@ -117,6 +117,29 @@ async function verifyViewport(browser, viewport) {
 			await input.endDrag();
 		}
 
+		const skillStart = {
+			x: viewport.width / 2,
+			y: viewport.height * 0.58
+		};
+		const skillTarget = {
+			x: skillStart.x + 112,
+			y: skillStart.y - 112
+		};
+		const beforeSkillSignature = await canvasRegionSignature(page, center, 128);
+		await input.startDrag(skillStart.x, skillStart.y, skillTarget.x, skillTarget.y);
+		try {
+			await waitForBodyTextMatch(page, /Walk|Run/);
+			await page.waitForTimeout(180);
+			const duringSkillSignature = await canvasRegionSignature(page, center, 128);
+			assert.notEqual(
+				duringSkillSignature,
+				beforeSkillSignature,
+				`${viewport.name} skill beam should alter the canvas near the player while movement continues`
+			);
+		} finally {
+			await input.endDrag();
+		}
+
 		await input.fastDrag(center.x, center.y, center.x + 110, center.y);
 		await input.fastDrag(center.x, center.y, center.x + 110, center.y);
 		await waitForBodyText(page, 'Dash');
