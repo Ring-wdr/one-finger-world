@@ -6,6 +6,7 @@ const BEAM_LENGTH = 5.6;
 const BEAM_CORE_OPACITY = 0.78;
 const BEAM_SHELL_OPACITY = 0.28;
 const MIN_DIRECTION_LENGTH_SQ = 0.000001;
+const EXPIRY_EPSILON_SECONDS = 0.000001;
 
 export class BeamActor {
 	readonly group = new THREE.Group();
@@ -61,6 +62,7 @@ export class BeamActor {
 
 		const dt = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
 		this.remainingSeconds = Math.max(0, this.remainingSeconds - dt);
+		if (this.remainingSeconds <= EXPIRY_EPSILON_SECONDS) this.remainingSeconds = 0;
 		this.setOpacity(this.remainingSeconds / BEAM_DURATION_SECONDS);
 
 		if (this.remainingSeconds === 0) {

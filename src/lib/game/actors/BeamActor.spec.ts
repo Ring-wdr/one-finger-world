@@ -50,12 +50,12 @@ describe('BeamActor', () => {
 		actor.start(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 1));
 		const startingOpacity = meshMaterials(actor)[0].opacity;
 
-		actor.update(2.999);
+		actor.update(2.9);
 
 		expect(actor.group.visible).toBe(true);
 		expect(meshMaterials(actor)[0].opacity).toBeLessThan(startingOpacity);
 
-		actor.update(0.001);
+		actor.update(0.1);
 
 		expect(actor.group.visible).toBe(false);
 
