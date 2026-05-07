@@ -410,6 +410,38 @@ describe('InputController', () => {
 		expect(gestures).toEqual([{ type: 'idle' }, { type: 'dash', direction: { x: 0, y: 1 } }]);
 	});
 
+	it('does not dash when a skill drag releases inside a prior fast-drag window', () => {
+		const { target, gestures } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 80, clientY: 0, timeStamp: 60 });
+		target.fire('pointerup', { pointerId: 1, clientX: 80, clientY: 0, timeStamp: 80 });
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 120, timeStamp: 260 });
+		target.fire('pointermove', { pointerId: 1, clientX: 212, clientY: 8, timeStamp: 280 });
+		target.fire('pointerup', { pointerId: 1, clientX: 212, clientY: 8, timeStamp: 300 });
+
+		expect(gestures.filter((gesture) => gesture.type === 'dash')).toEqual([]);
+		expect(gestures.at(-2)).toEqual({ type: 'skill', slot: 1 });
+		expect(gestures.at(-1)).toEqual({ type: 'idle' });
+	});
+
+	it('does not let a skill drag release arm the next fast drag into a dash', () => {
+		const { target, gestures } = setup();
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 120, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 212, clientY: 8, timeStamp: 40 });
+		target.fire('pointerup', { pointerId: 1, clientX: 212, clientY: 8, timeStamp: 80 });
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 220 });
+		target.fire('pointermove', { pointerId: 1, clientX: 80, clientY: 0, timeStamp: 260 });
+		target.fire('pointerup', { pointerId: 1, clientX: 80, clientY: 0, timeStamp: 280 });
+
+		expect(gestures.filter((gesture) => gesture.type === 'dash')).toEqual([]);
+		expect(gestures).toContainEqual({ type: 'skill', slot: 1 });
+		expect(gestures.at(-1)).toEqual({ type: 'idle' });
+	});
+
 	it('does not expose signed zero in direction payloads', () => {
 		const { target, gestures } = setup();
 
@@ -529,7 +561,7 @@ describe('InputController', () => {
 		expect(feedback.filter((event) => event.type === 'skill-buttons-hidden')).toHaveLength(1);
 	});
 
-	it('allows different slots once each during a single touch but never repeats a slot', () => {
+	it('fires only the first skill during a single touch after buttons hide', () => {
 		const { target, gestures } = setup();
 
 		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 120, timeStamp: 0 });
@@ -539,8 +571,7 @@ describe('InputController', () => {
 		target.fire('pointermove', { pointerId: 1, clientX: -12, clientY: 8, timeStamp: 220 });
 
 		expect(gestures.filter((gesture) => gesture.type === 'skill')).toEqual([
-			{ type: 'skill', slot: 1 },
-			{ type: 'skill', slot: 2 }
+			{ type: 'skill', slot: 1 }
 		]);
 	});
 

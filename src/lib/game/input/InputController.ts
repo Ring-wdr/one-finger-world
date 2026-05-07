@@ -210,12 +210,13 @@ export class InputController {
 		const direction = this.directionFromStart(active);
 		const dragDuration = event.timeStamp - (active.dragStartTime ?? active.startTime);
 		const speed = distance / Math.max(1, dragDuration);
+		const triggeredSkill = active.triggeredSkillSlots.size > 0;
 		this.hideSkillButtons(active, event.timeStamp);
 		this.releaseActivePointer();
 		this.safeEmitFeedback(releaseFeedback);
 		this.active = null;
 
-		if (speed >= this.thresholds.fastDragPxPerMs) {
+		if (!triggeredSkill && speed >= this.thresholds.fastDragPxPerMs) {
 			if (
 				this.lastFastDragTime !== null &&
 				event.timeStamp - this.lastFastDragTime <= this.thresholds.dashWindowMs
@@ -329,6 +330,8 @@ export class InputController {
 	}
 
 	private emitSkillIfNeeded(active: ActivePointer, timeStamp: number) {
+		if (!active.skillButtonsVisible) return;
+
 		for (const button of active.skillButtons) {
 			if (active.triggeredSkillSlots.has(button.slot)) continue;
 			if (!this.isThumbInsideSkillButton(active, button)) continue;

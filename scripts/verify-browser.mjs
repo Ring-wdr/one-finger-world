@@ -136,15 +136,15 @@ async function verifyViewport(browser, viewport) {
 				/Walk|Run/,
 				`${viewport.name} skill beam should keep movement HUD active`
 			);
+			const duringSkillBeamPixels = await countBeamLikePixels(page, center, 128);
+			assert.ok(
+				duringSkillBeamPixels > 0 && duringSkillBeamPixels >= beforeSkillBeamPixels + 16,
+				`${viewport.name} skill beam should add beam-colored pixels near the player (before=${beforeSkillBeamPixels}, during=${duringSkillBeamPixels})`
+			);
 		} finally {
 			await input.endDrag();
 		}
 		await page.waitForTimeout(360);
-		const afterSkillBeamPixels = await countBeamLikePixels(page, center, 128);
-		assert.ok(
-			afterSkillBeamPixels >= beforeSkillBeamPixels + 20 || afterSkillBeamPixels >= 32,
-			`${viewport.name} skill beam should add beam-colored pixels near the player`
-		);
 
 		await input.fastDrag(center.x, center.y, center.x + 110, center.y);
 		await input.fastDrag(center.x, center.y, center.x + 110, center.y);
@@ -411,7 +411,7 @@ async function countBeamLikePixels(page, point, radius = 96) {
 		const maxX = Math.min(width - 1, centerX + bufferRadius);
 		const minY = Math.max(0, centerY - bufferRadius);
 		const maxY = Math.min(height - 1, centerY + bufferRadius);
-		const stride = Math.max(1, Math.round(4 * Math.max(scaleX, scaleY)));
+		const stride = Math.max(1, Math.round(Math.max(scaleX, scaleY)));
 		const pixel = new Uint8Array(4);
 		let count = 0;
 
@@ -419,10 +419,10 @@ async function countBeamLikePixels(page, point, radius = 96) {
 			for (let x = minX; x <= maxX; x += stride) {
 				gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
 				if (
-					pixel[1] >= 140 &&
-					pixel[2] >= 170 &&
-					pixel[2] >= pixel[0] &&
-					pixel[1] >= pixel[0] * 0.78
+					pixel[2] >= 235 &&
+					pixel[1] >= 220 &&
+					pixel[0] <= 245 &&
+					pixel[2] - pixel[0] >= 10
 				) {
 					count += 1;
 				}
