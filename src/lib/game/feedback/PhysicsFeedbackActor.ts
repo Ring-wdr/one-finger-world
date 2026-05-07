@@ -164,6 +164,8 @@ export class PhysicsFeedbackActor {
 			return;
 		}
 
+		if (gesture.type === 'skill') return;
+
 		if (gesture.type === 'dash') {
 			this.dashWaveAge = 0;
 			this.placeGroundObject(this.dashWave, playerWorld);

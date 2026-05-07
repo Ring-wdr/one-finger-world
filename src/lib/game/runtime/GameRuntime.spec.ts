@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionState, InputFeedbackEvent, InputGesture, ScreenPoint } from '$lib/game/types';
+import * as THREE from 'three';
 
 class FakeDomElement {
 	style: Record<string, string> = {};
@@ -41,16 +42,23 @@ vi.mock('three', async (importOriginal) => {
 });
 
 interface RuntimeInternals {
+	beam: {
+		group: THREE.Group;
+	};
 	feedback: {
 		handlePointerFeedback(event: ScreenInputFeedbackEvent): void;
 		handleGesture(gesture: InputGesture, playerWorld: unknown): void;
 		dispose(): void;
+	};
+	player: {
+		group: THREE.Group;
 	};
 	renderer: {
 		domElement: FakeDomElement;
 	};
 	handleGesture(gesture: InputGesture): void;
 	handleInputFeedback(event: InputFeedbackEvent): void;
+	tick(now: number): void;
 }
 
 interface ScreenInputFeedbackEvent {
@@ -86,7 +94,7 @@ describe('GameRuntime', () => {
 		globalThis.performance = originalPerformance;
 	});
 
-	it('preserves the current movement action when a skill gesture arrives', async () => {
+	it('starts a beam and preserves the current movement action when a skill gesture arrives', async () => {
 		const { GameRuntime } = await import('./GameRuntime');
 		const actions: ActionState[] = [];
 		const runtime = new GameRuntime({
@@ -97,9 +105,19 @@ describe('GameRuntime', () => {
 		const internals = runtime as unknown as RuntimeInternals;
 
 		internals.handleGesture({ type: 'move', mode: 'run', direction: { x: 1, y: 0 } });
+		const playerPositionBeforeSkill = internals.player.group.position.clone();
 		internals.handleGesture({ type: 'skill', slot: 1 });
 
 		expect(actions.map((action) => action.kind)).toEqual(['idle', 'run']);
+		expect(internals.beam.group.visible).toBe(true);
+		expect(internals.beam.group.position.x).toBeCloseTo(playerPositionBeforeSkill.x);
+		expect(internals.beam.group.position.y).toBeCloseTo(playerPositionBeforeSkill.y + 0.95);
+		expect(internals.beam.group.position.z).toBeCloseTo(playerPositionBeforeSkill.z);
+		internals.tick(50);
+		expect(internals.player.group.position.distanceTo(playerPositionBeforeSkill)).toBeGreaterThan(0);
+		expect(internals.beam.group.position.x).toBeCloseTo(internals.player.group.position.x);
+		expect(internals.beam.group.position.y).toBeCloseTo(internals.player.group.position.y + 0.95);
+		expect(internals.beam.group.position.z).toBeCloseTo(internals.player.group.position.z);
 
 		runtime.dispose();
 	});
