@@ -71,6 +71,16 @@ describe('BeamActor', () => {
 		actor.dispose();
 	});
 
+	it('falls back to +Z when direction has a non-finite horizontal component', () => {
+		const actor = new BeamActor();
+
+		actor.start(new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 0, Number.NaN));
+
+		expect(actor.group.rotation.y).toBe(0);
+
+		actor.dispose();
+	});
+
 	it('dispose removes from scene graph and clears children', () => {
 		const scene = new THREE.Scene();
 		const actor = new BeamActor();

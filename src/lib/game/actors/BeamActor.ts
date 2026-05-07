@@ -92,8 +92,10 @@ export class BeamActor {
 	}
 
 	private resolveYaw(direction: THREE.Vector3) {
-		const x = Number.isFinite(direction.x) ? direction.x : 0;
-		const z = Number.isFinite(direction.z) ? direction.z : 0;
+		if (!Number.isFinite(direction.x) || !Number.isFinite(direction.z)) return 0;
+
+		const x = direction.x;
+		const z = direction.z;
 		if (x * x + z * z <= MIN_DIRECTION_LENGTH_SQ) return 0;
 
 		return Math.atan2(x, z);
