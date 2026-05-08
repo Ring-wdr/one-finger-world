@@ -1,4 +1,9 @@
-import type { InputFeedbackEvent, InputGesture, ScreenPoint } from '$lib/game/types';
+import type {
+	InputFeedbackEvent,
+	InputGesture,
+	ScreenPoint,
+	SkillButtonFeedback
+} from '$lib/game/types';
 import * as THREE from 'three';
 import { isThumbPointVisible } from './feedbackPhysics';
 
@@ -13,6 +18,15 @@ const THUMB_TARGET_COLOR = 0x7dd3fc;
 const TETHER_COLOR = 0xe0f2fe;
 const DASH_COLOR = 0x93c5fd;
 const ATTACK_COLOR = 0xfff7ad;
+const SKILL_BUTTON_COLORS: Record<SkillButtonFeedback['slot'], number> = {
+	1: 0xfde68a,
+	2: 0xa7f3d0,
+	3: 0xfca5a5,
+	4: 0xc4b5fd
+};
+const SKILL_BUTTON_OPACITY = 0.62;
+const SKILL_BUTTON_INNER_RADIUS_RATIO = 0.72;
+const SKILL_BUTTON_OUTER_RADIUS_RATIO = 1;
 const WORLD_GROUND_Y = 0.035;
 const SCREEN_Z = 0;
 const THUMB_SPRING_STIFFNESS = 130;
@@ -28,6 +42,10 @@ export class PhysicsFeedbackActor {
 	private readonly runHalo: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
 	private readonly dashWave: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
 	private readonly attackPulse: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+	private readonly skillButtons = new Map<
+		SkillButtonFeedback['slot'],
+		THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>
+	>();
 	private readonly geometries: THREE.BufferGeometry[] = [];
 	private readonly materials: THREE.Material[] = [];
 	private readonly startScreen = new THREE.Vector3();
@@ -53,6 +71,17 @@ export class PhysicsFeedbackActor {
 		this.runHalo = this.createScreenRing('run-halo', TETHER_COLOR, 42, 50, 0.36);
 		this.dashWave = this.createGroundRing('dash-wave', DASH_COLOR, 0.34, 0.42, 0);
 		this.attackPulse = this.createGroundRing('attack-pulse', ATTACK_COLOR, 0.42, 0.5, 0);
+		for (const slot of [1, 2, 3, 4] as const) {
+			const skillButton = this.createScreenRing(
+				`skill-button-${slot}`,
+				SKILL_BUTTON_COLORS[slot],
+				SKILL_BUTTON_INNER_RADIUS_RATIO,
+				SKILL_BUTTON_OUTER_RADIUS_RATIO,
+				SKILL_BUTTON_OPACITY
+			);
+			skillButton.visible = false;
+			this.skillButtons.set(slot, skillButton);
+		}
 
 		const tetherGeometry = this.trackGeometry(new THREE.PlaneGeometry(1, 7));
 		const tetherMaterial = this.trackMaterial(
@@ -85,6 +114,16 @@ export class PhysicsFeedbackActor {
 	}
 
 	handlePointerFeedback({ event, startScreen, thumbScreen }: ScreenInputFeedbackEvent) {
+		if (event.type === 'skill-buttons') {
+			this.showSkillButtons(event.buttons);
+			return;
+		}
+
+		if (event.type === 'skill-buttons-hidden') {
+			this.hideSkillButtons();
+			return;
+		}
+
 		this.screenPointToLayer(startScreen, this.startScreen);
 		this.screenPointToLayer(thumbScreen, this.thumbTargetScreen);
 
@@ -124,6 +163,8 @@ export class PhysicsFeedbackActor {
 			}
 			return;
 		}
+
+		if (gesture.type === 'skill') return;
 
 		if (gesture.type === 'dash') {
 			this.dashWaveAge = 0;
@@ -286,6 +327,27 @@ export class PhysicsFeedbackActor {
 	private hideThumbAndTether() {
 		this.thumbTarget.visible = false;
 		this.tether.visible = false;
+	}
+
+	private showSkillButtons(buttons: SkillButtonFeedback[]) {
+		this.hideSkillButtons();
+
+		for (const button of buttons) {
+			const skillButton = this.skillButtons.get(button.slot);
+			if (!skillButton) continue;
+
+			this.screenPointToLayer(button.center, this.scratch);
+			this.placeScreenObject(skillButton, this.scratch);
+			skillButton.scale.setScalar(button.radius);
+			skillButton.material.opacity = SKILL_BUTTON_OPACITY;
+			skillButton.visible = true;
+		}
+	}
+
+	private hideSkillButtons() {
+		for (const skillButton of this.skillButtons.values()) {
+			skillButton.visible = false;
+		}
 	}
 
 	private createScreenRing(

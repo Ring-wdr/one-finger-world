@@ -1,3 +1,4 @@
+import { BeamActor } from '$lib/game/actors/BeamActor';
 import { PlayerActor } from '$lib/game/actors/PlayerActor';
 import { PhysicsFeedbackActor } from '$lib/game/feedback/PhysicsFeedbackActor';
 import { InputController } from '$lib/game/input/InputController';
@@ -43,6 +44,7 @@ export class GameRuntime {
 	private feedbackCamera: THREE.OrthographicCamera | null = null;
 	private input: InputController | null = null;
 	private player: PlayerActor | null = null;
+	private beam: BeamActor | null = null;
 	private feedback: PhysicsFeedbackActor | null = null;
 	private world: BlockWorld | null = null;
 	private animationFrame: number | null = null;
@@ -61,6 +63,7 @@ export class GameRuntime {
 	private readonly cameraForward = new THREE.Vector3();
 	private readonly cameraRight = new THREE.Vector3();
 	private readonly convertedDirection = new THREE.Vector3();
+	private readonly beamDirection = new THREE.Vector3();
 	private readonly feedbackStartScreen = { x: 0, y: 0 };
 	private readonly feedbackThumbScreen = { x: 0, y: 0 };
 
@@ -101,6 +104,9 @@ export class GameRuntime {
 
 		this.player?.dispose();
 		this.player = null;
+
+		this.beam?.dispose();
+		this.beam = null;
 
 		this.world?.dispose();
 		this.world = null;
@@ -158,6 +164,10 @@ export class GameRuntime {
 		player.faceWorldDirection(this.latestDirection);
 		scene.add(player.group);
 
+		const beam = new BeamActor();
+		this.beam = beam;
+		scene.add(beam.group);
+
 		const feedback = new PhysicsFeedbackActor();
 		this.feedback = feedback;
 		scene.add(feedback.worldGroup);
@@ -200,6 +210,7 @@ export class GameRuntime {
 
 		this.input?.update();
 		this.updatePlayer(deltaSeconds);
+		this.updateBeam(deltaSeconds);
 		this.updateAttackState(deltaSeconds);
 		this.feedback?.update(deltaSeconds);
 		this.updateCamera(deltaSeconds);
@@ -280,6 +291,11 @@ export class GameRuntime {
 			return;
 		}
 
+		if (gesture.type === 'skill') {
+			this.startSkillBeam();
+			return;
+		}
+
 		this.movementMode = null;
 		if (this.dashRemainingSeconds <= 0 && this.attackRemainingSeconds <= 0) {
 			this.publishAction(IDLE_ACTION);
@@ -298,6 +314,31 @@ export class GameRuntime {
 
 	private readonly handleInputFeedback = (event: InputFeedbackEvent) => {
 		if (this.disposed || !this.feedback || !this.renderer) return;
+
+		if (event.type === 'skill-buttons-hidden') {
+			this.feedback.handlePointerFeedback({
+				event,
+				startScreen: this.feedbackStartScreen,
+				thumbScreen: this.feedbackThumbScreen
+			});
+			return;
+		}
+
+		if (event.type === 'skill-buttons') {
+			this.feedback.handlePointerFeedback({
+				event: {
+					type: 'skill-buttons',
+					buttons: event.buttons.map((button) => ({
+						...button,
+						center: this.clientPointToFeedbackScreen(button.center, { x: 0, y: 0 })
+					})),
+					timeStamp: event.timeStamp
+				},
+				startScreen: this.feedbackStartScreen,
+				thumbScreen: this.feedbackThumbScreen
+			});
+			return;
+		}
 
 		this.clientPointToFeedbackScreen(event.start, this.feedbackStartScreen);
 		this.clientPointToFeedbackScreen(event.thumb, this.feedbackThumbScreen);
@@ -353,6 +394,13 @@ export class GameRuntime {
 		this.world.clampPosition(position, PLAYER_MARGIN);
 		this.player.setPosition(position);
 		this.player.update(deltaSeconds, isMoving, isRunning, isDashing);
+	}
+
+	private updateBeam(deltaSeconds: number) {
+		if (!this.beam || !this.player) return;
+
+		this.beam.setOrigin(this.player.group.position);
+		this.beam.update(deltaSeconds);
 	}
 
 	private updateAttackState(deltaSeconds: number) {
@@ -420,6 +468,21 @@ export class GameRuntime {
 		}
 
 		return this.convertedDirection.normalize();
+	}
+
+	private startSkillBeam() {
+		if (!this.beam || !this.player) return;
+
+		this.beamDirection.copy(this.latestDirection);
+		if (
+			!Number.isFinite(this.beamDirection.x) ||
+			!Number.isFinite(this.beamDirection.y) ||
+			!Number.isFinite(this.beamDirection.z) ||
+			this.beamDirection.lengthSq() <= 0.000001
+		) {
+			this.beamDirection.set(0, 0, 1);
+		}
+		this.beam.start(this.player.group.position, this.beamDirection);
 	}
 
 	private publishAction(state: ActionState) {

@@ -5,7 +5,9 @@ import type {
 	InputFeedbackHandler,
 	InputGesture,
 	MoveMode,
-	ScreenPoint
+	ScreenPoint,
+	SkillButtonFeedback,
+	SkillSlot
 } from '$lib/game/types';
 
 export interface PointerSurface {
@@ -31,6 +33,15 @@ const DEFAULT_THRESHOLDS: InputThresholds = {
 	dashWindowMs: 320
 };
 
+const SKILL_BUTTON_DISTANCE_PX = 112;
+const SKILL_BUTTON_RADIUS_PX = 24;
+const SKILL_BUTTON_DIRECTIONS: Record<SkillSlot, Direction2> = {
+	1: { x: 1, y: -1 },
+	2: { x: -1, y: -1 },
+	3: { x: 1, y: 1 },
+	4: { x: -1, y: 1 }
+};
+
 interface ActivePointer {
 	pointerId: number;
 	startX: number;
@@ -42,6 +53,9 @@ interface ActivePointer {
 	dragging: boolean;
 	lastDirection: Direction2;
 	lastMode: MoveMode | null;
+	skillButtons: SkillButtonFeedback[];
+	triggeredSkillSlots: Set<SkillSlot>;
+	skillButtonsVisible: boolean;
 }
 
 export class InputController {
@@ -102,7 +116,10 @@ export class InputController {
 			dragStartTime: null,
 			dragging: false,
 			lastDirection: { x: 0, y: 1 },
-			lastMode: null
+			lastMode: null,
+			skillButtons: this.createSkillButtons(event.clientX, event.clientY),
+			triggeredSkillSlots: new Set<SkillSlot>(),
+			skillButtonsVisible: true
 		};
 
 		this.target.setPointerCapture?.(event.pointerId);
@@ -110,6 +127,11 @@ export class InputController {
 			type: 'press',
 			start: this.pointFromEvent(event),
 			thumb: this.pointFromEvent(event),
+			timeStamp: event.timeStamp
+		});
+		this.safeEmitFeedback({
+			type: 'skill-buttons',
+			buttons: this.active.skillButtons,
 			timeStamp: event.timeStamp
 		});
 	};
@@ -142,6 +164,7 @@ export class InputController {
 		});
 		active.lastMode = mode;
 		this.emit({ type: 'move', mode, direction: active.lastDirection });
+		this.emitSkillIfNeeded(active, event.timeStamp);
 	};
 
 	private readonly handlePointerUp = (event: PointerEvent) => {
@@ -169,6 +192,7 @@ export class InputController {
 		};
 
 		if (!active.dragging) {
+			this.hideSkillButtons(active, event.timeStamp);
 			this.releaseActivePointer();
 			this.safeEmitFeedback(releaseFeedback);
 			this.active = null;
@@ -186,11 +210,13 @@ export class InputController {
 		const direction = this.directionFromStart(active);
 		const dragDuration = event.timeStamp - (active.dragStartTime ?? active.startTime);
 		const speed = distance / Math.max(1, dragDuration);
+		const triggeredSkill = active.triggeredSkillSlots.size > 0;
+		this.hideSkillButtons(active, event.timeStamp);
 		this.releaseActivePointer();
 		this.safeEmitFeedback(releaseFeedback);
 		this.active = null;
 
-		if (speed >= this.thresholds.fastDragPxPerMs) {
+		if (!triggeredSkill && speed >= this.thresholds.fastDragPxPerMs) {
 			if (
 				this.lastFastDragTime !== null &&
 				event.timeStamp - this.lastFastDragTime <= this.thresholds.dashWindowMs
@@ -220,6 +246,7 @@ export class InputController {
 			wasDragging: active.dragging,
 			timeStamp: event.timeStamp
 		});
+		this.hideSkillButtons(active, event.timeStamp);
 		this.releaseActivePointer();
 		this.active = null;
 		this.emit({ type: 'idle' });
@@ -239,6 +266,7 @@ export class InputController {
 			wasDragging: active.dragging,
 			timeStamp: event.timeStamp
 		});
+		this.hideSkillButtons(active, event.timeStamp);
 		this.releaseActivePointer();
 		this.active = null;
 		this.emit({ type: 'idle' });
@@ -275,6 +303,51 @@ export class InputController {
 		} catch {
 			// Visual feedback must not interrupt gameplay input handling.
 		}
+	}
+
+	private hideSkillButtons(active: ActivePointer, timeStamp: number) {
+		if (!active.skillButtonsVisible) return;
+
+		active.skillButtonsVisible = false;
+		this.safeEmitFeedback({
+			type: 'skill-buttons-hidden',
+			timeStamp
+		});
+	}
+
+	private createSkillButtons(startX: number, startY: number): SkillButtonFeedback[] {
+		return ([1, 2, 3, 4] as SkillSlot[]).map((slot) => {
+			const direction = SKILL_BUTTON_DIRECTIONS[slot];
+			return {
+				slot,
+				center: {
+					x: startX + direction.x * SKILL_BUTTON_DISTANCE_PX,
+					y: startY + direction.y * SKILL_BUTTON_DISTANCE_PX
+				},
+				radius: SKILL_BUTTON_RADIUS_PX
+			};
+		});
+	}
+
+	private emitSkillIfNeeded(active: ActivePointer, timeStamp: number) {
+		if (!active.skillButtonsVisible) return;
+
+		for (const button of active.skillButtons) {
+			if (active.triggeredSkillSlots.has(button.slot)) continue;
+			if (!this.isThumbInsideSkillButton(active, button)) continue;
+
+			active.triggeredSkillSlots.add(button.slot);
+			this.hideSkillButtons(active, timeStamp);
+			this.emit({ type: 'skill', slot: button.slot });
+			return;
+		}
+	}
+
+	private isThumbInsideSkillButton(active: ActivePointer, button: SkillButtonFeedback) {
+		return (
+			Math.hypot(active.currentX - button.center.x, active.currentY - button.center.y) <=
+			button.radius
+		);
 	}
 
 	private distanceFromStart(active: ActivePointer) {
