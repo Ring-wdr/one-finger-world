@@ -154,7 +154,8 @@ async function verifyViewport(browser, viewport) {
 			page.waitForURL((url) => new URL(url).pathname === homePathname),
 			page.goBack()
 		]);
-		await page.getByRole('button', { name: 'Game Start' }).waitFor({ state: 'visible' });
+		await page.getByRole('button', { name: '게임 시작' }).waitFor({ state: 'visible' });
+		await page.getByRole('button', { name: '환경설정' }).waitFor({ state: 'visible' });
 	} finally {
 		await context.close();
 	}
@@ -170,7 +171,7 @@ async function startGame(page, viewport) {
 		if (isPathname(page.url(), PLAY_PATHNAME)) return;
 
 		const remaining = Math.max(1, deadline - Date.now());
-		const startButton = page.getByRole('button', { name: 'Game Start' });
+		const startButton = page.getByRole('button', { name: '게임 시작' });
 
 		try {
 			await startButton.waitFor({
@@ -203,12 +204,24 @@ async function startGame(page, viewport) {
 
 	const details = lastError instanceof Error ? ` Last error: ${lastError.message}` : '';
 	throw new Error(
-		`Game Start did not navigate to ${PLAY_PATHNAME} within ${START_NAVIGATION_TIMEOUT_MS}ms after ${attempts} attempts. Current URL: ${page.url()}.${details}`
+		`게임 시작 did not navigate to ${PLAY_PATHNAME} within ${START_NAVIGATION_TIMEOUT_MS}ms after ${attempts} attempts. Current URL: ${page.url()}.${details}`
 	);
 }
 
 async function selectComfortablePreset(page, viewport, timeoutMs) {
-	const comfortableButton = page.getByRole('button', { name: '편안' });
+	const settingsButton = page.getByRole('button', { name: '환경설정' });
+	await settingsButton.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
+
+	if (viewport.touch) {
+		await settingsButton.tap({ timeout: Math.min(1000, timeoutMs) });
+	} else {
+		await settingsButton.click({ timeout: Math.min(1000, timeoutMs) });
+	}
+
+	const dialog = page.getByRole('dialog', { name: '환경설정' });
+	await dialog.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
+
+	const comfortableButton = dialog.getByRole('button', { name: '편안' });
 	await comfortableButton.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
 
 	if (viewport.touch) {
@@ -217,14 +230,25 @@ async function selectComfortablePreset(page, viewport, timeoutMs) {
 		await comfortableButton.click({ timeout: Math.min(1000, timeoutMs) });
 	}
 
-	const tapControl = page.locator('.option-slider').filter({ hasText: '탭 인식 시간' });
+	const tapControl = dialog.locator('.option-slider').filter({ hasText: '탭 인식 시간' });
 	await tapControl.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
-	await tapControl.getByText('240 ms').waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
+	await tapControl.getByText('240 ms').waitFor({
+		state: 'visible',
+		timeout: Math.min(1000, timeoutMs)
+	});
 	await assert.equal(
 		await tapControl.locator('input[type="range"]').inputValue(),
 		'240',
 		`${viewport.name} comfortable preset should set tap recognition slider to 240 ms`
 	);
+
+	const closeButton = dialog.getByRole('button', { name: '닫기' });
+	if (viewport.touch) {
+		await closeButton.tap({ timeout: Math.min(1000, timeoutMs) });
+	} else {
+		await closeButton.click({ timeout: Math.min(1000, timeoutMs) });
+	}
+	await dialog.waitFor({ state: 'hidden', timeout: Math.min(1000, timeoutMs) });
 }
 
 async function waitForPlayRoute(page, timeoutMs) {
