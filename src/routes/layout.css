@@ -64,25 +64,27 @@ button {
 }
 
 .title-clouds {
-	z-index: 1;
+	z-index: 3;
 	overflow: hidden;
 	pointer-events: none;
 }
 
 .cloud-band {
 	position: absolute;
-	left: -45vw;
+	left: -38vw;
 	display: block;
-	width: 48vw;
-	min-width: 320px;
-	height: 86px;
+	width: 56vw;
+	min-width: 440px;
+	height: 104px;
 	border-radius: 999px;
 	background:
-		radial-gradient(circle at 18% 55%, rgba(247, 241, 223, 0.36), transparent 34%),
-		radial-gradient(circle at 46% 42%, rgba(184, 202, 210, 0.32), transparent 38%),
-		radial-gradient(circle at 74% 58%, rgba(247, 241, 223, 0.24), transparent 34%);
-	filter: blur(9px);
-	opacity: 0.62;
+		radial-gradient(circle at 18% 55%, rgba(247, 241, 223, 0.68), transparent 36%),
+		radial-gradient(circle at 46% 42%, rgba(184, 202, 210, 0.58), transparent 40%),
+		radial-gradient(circle at 74% 58%, rgba(247, 241, 223, 0.42), transparent 36%),
+		linear-gradient(90deg, transparent, rgba(247, 241, 223, 0.22), transparent);
+	filter: blur(11px);
+	opacity: 0.82;
+	mix-blend-mode: screen;
 	animation-name: cloud-drift;
 	animation-duration: 46s;
 	animation-timing-function: linear;
@@ -95,16 +97,16 @@ button {
 
 .cloud-band-b {
 	top: 22%;
-	height: 70px;
-	opacity: 0.48;
+	height: 84px;
+	opacity: 0.68;
 	animation-duration: 64s;
 	animation-delay: -22s;
 }
 
 .cloud-band-c {
 	top: 34%;
-	height: 58px;
-	opacity: 0.34;
+	height: 70px;
+	opacity: 0.54;
 	animation-duration: 82s;
 	animation-delay: -44s;
 }
@@ -128,7 +130,7 @@ button {
 
 .title-panel {
 	position: relative;
-	z-index: 3;
+	z-index: 4;
 	display: grid;
 	gap: clamp(76px, 15vh, 132px);
 	justify-items: center;
