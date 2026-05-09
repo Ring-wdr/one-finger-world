@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { InputThresholds } from '$lib/game/input/InputController';
 	import type { ActionStateHandler, RuntimeErrorHandler } from '$lib/game/types';
 
 	let {
+		inputThresholds,
 		onActionStateChange,
 		onRuntimeError
 	}: {
+		inputThresholds?: InputThresholds;
 		onActionStateChange: ActionStateHandler;
 		onRuntimeError: RuntimeErrorHandler;
 	} = $props();
@@ -22,6 +25,7 @@
 
 				runtime = new GameRuntime({
 					container: host,
+					inputThresholds,
 					onActionStateChange,
 					onRuntimeError
 				});

@@ -1,7 +1,7 @@
 import { BeamActor } from '$lib/game/actors/BeamActor';
 import { PlayerActor } from '$lib/game/actors/PlayerActor';
 import { PhysicsFeedbackActor } from '$lib/game/feedback/PhysicsFeedbackActor';
-import { InputController } from '$lib/game/input/InputController';
+import { InputController, type InputThresholds } from '$lib/game/input/InputController';
 import {
 	IDLE_ACTION,
 	type ActionState,
@@ -17,6 +17,7 @@ import * as THREE from 'three';
 
 interface GameRuntimeOptions {
 	container: HTMLElement;
+	inputThresholds?: InputThresholds;
 	onActionStateChange: ActionStateHandler;
 	onRuntimeError: RuntimeErrorHandler;
 }
@@ -35,6 +36,7 @@ const MAX_DELTA_SECONDS = 0.05;
 
 export class GameRuntime {
 	private readonly container: HTMLElement;
+	private readonly inputThresholds: InputThresholds | undefined;
 	private onActionStateChange: ActionStateHandler | null;
 	private onRuntimeError: RuntimeErrorHandler | null;
 	private renderer: THREE.WebGLRenderer | null = null;
@@ -67,8 +69,9 @@ export class GameRuntime {
 	private readonly feedbackStartScreen = { x: 0, y: 0 };
 	private readonly feedbackThumbScreen = { x: 0, y: 0 };
 
-	constructor({ container, onActionStateChange, onRuntimeError }: GameRuntimeOptions) {
+	constructor({ container, inputThresholds, onActionStateChange, onRuntimeError }: GameRuntimeOptions) {
 		this.container = container;
+		this.inputThresholds = inputThresholds;
 		this.onActionStateChange = onActionStateChange;
 		this.onRuntimeError = onRuntimeError;
 
@@ -186,7 +189,7 @@ export class GameRuntime {
 		this.input = new InputController(
 			renderer.domElement,
 			this.handleGesture,
-			undefined,
+			this.inputThresholds,
 			this.handleInputFeedback
 		);
 		this.resizeListener = this.handleResize;
