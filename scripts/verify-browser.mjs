@@ -10,7 +10,6 @@ const SERVER_HOST = '127.0.0.1';
 const SERVER_PORT = 5173;
 const SERVER_READY_TIMEOUT_MS = 30000;
 const SERVER_POLL_INTERVAL_MS = 250;
-const PLAY_PATHNAME = '/play';
 const START_NAVIGATION_TIMEOUT_MS = 5000;
 const START_RETRY_INTERVAL_MS = 100;
 const LOCAL_SERVER_ARGS = [
@@ -26,7 +25,8 @@ const LOCAL_SERVER_ARGS = [
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const baseURL = process.env.APP_URL ?? DEFAULT_BASE_URL;
 const shouldStartServer = process.env.APP_URL === undefined;
-const homePathname = new URL(baseURL).pathname || '/';
+const homePathname = normalizeHomePathname(new URL(baseURL).pathname || '/');
+const playPathname = `${homePathname === '/' ? '' : homePathname}/play`;
 
 const viewports = [
 	{ name: 'mobile', width: 390, height: 844, touch: true },
@@ -168,7 +168,7 @@ async function startGame(page, viewport) {
 	let optionsVerified = false;
 
 	while (Date.now() < deadline) {
-		if (isPathname(page.url(), PLAY_PATHNAME)) return;
+		if (isPathname(page.url(), playPathname)) return;
 
 		const remaining = Math.max(1, deadline - Date.now());
 		const startButton = page.getByRole('button', { name: '게임 시작' });
@@ -204,7 +204,7 @@ async function startGame(page, viewport) {
 
 	const details = lastError instanceof Error ? ` Last error: ${lastError.message}` : '';
 	throw new Error(
-		`게임 시작 did not navigate to ${PLAY_PATHNAME} within ${START_NAVIGATION_TIMEOUT_MS}ms after ${attempts} attempts. Current URL: ${page.url()}.${details}`
+		`게임 시작 did not navigate to ${playPathname} within ${START_NAVIGATION_TIMEOUT_MS}ms after ${attempts} attempts. Current URL: ${page.url()}.${details}`
 	);
 }
 
@@ -253,13 +253,18 @@ async function selectComfortablePreset(page, viewport, timeoutMs) {
 
 async function waitForPlayRoute(page, timeoutMs) {
 	try {
-		await page.waitForURL((url) => new URL(url).pathname === PLAY_PATHNAME, {
+		await page.waitForURL((url) => new URL(url).pathname === playPathname, {
 			timeout: timeoutMs
 		});
 		return true;
 	} catch {
-		return isPathname(page.url(), PLAY_PATHNAME);
+		return isPathname(page.url(), playPathname);
 	}
+}
+
+function normalizeHomePathname(pathname) {
+	if (!pathname || pathname === '/') return '/';
+	return pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
 }
 
 function isPathname(url, pathname) {

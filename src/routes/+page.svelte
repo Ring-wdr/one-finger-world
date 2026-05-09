@@ -56,6 +56,8 @@
 	let testFeedback = $state('대기');
 	let testDetail = $state('0 ms / 0 px');
 	let settingsOpen = $state(false);
+	let settingsButton = $state<HTMLButtonElement | null>(null);
+	let settingsDialog = $state<HTMLDialogElement | null>(null);
 	let closeSettingsButton = $state<HTMLButtonElement | null>(null);
 
 	const activePreset = $derived(
@@ -74,24 +76,38 @@
 	async function openSettings() {
 		settingsOpen = true;
 		await tick();
+		if (settingsDialog && !settingsDialog.open) {
+			settingsDialog.showModal();
+		}
 		closeSettingsButton?.focus();
 	}
 
 	function closeSettings() {
+		if (settingsDialog?.open) {
+			settingsDialog.close();
+		}
 		settingsOpen = false;
 		testPointer = null;
+		settingsButton?.focus();
 	}
 
-	function handleSettingsKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape' && settingsOpen) {
-			closeSettings();
-		}
+	function handleSettingsCancel(event: Event) {
+		event.preventDefault();
+		closeSettings();
 	}
 
 	function handleSettingsBackdropClick(event: MouseEvent) {
 		if (event.target === event.currentTarget) {
 			closeSettings();
 		}
+	}
+
+	function cancelPadTest(pointerId: number) {
+		if (!testPointer || testPointer.pointerId !== pointerId) return;
+
+		testPointer = null;
+		testFeedback = '대기';
+		testDetail = '0 ms / 0 px';
 	}
 
 	function applyPreset(presetId: InputThresholdPresetId) {
@@ -115,6 +131,9 @@
 		if (event.button !== undefined && event.button !== 0) return;
 
 		event.preventDefault();
+		if (event.currentTarget instanceof HTMLElement) {
+			event.currentTarget.setPointerCapture(event.pointerId);
+		}
 		testPointer = {
 			pointerId: event.pointerId,
 			startX: event.clientX,
@@ -125,6 +144,10 @@
 		};
 		testFeedback = '입력 중';
 		testDetail = '0 ms / 0 px';
+	}
+
+	function handlePadPointerCancel(event: PointerEvent) {
+		cancelPadTest(event.pointerId);
 	}
 
 	function handlePadPointerMove(event: PointerEvent) {
@@ -200,8 +223,6 @@
 	<title>One Finger Act</title>
 </svelte:head>
 
-<svelte:window onkeydown={handleSettingsKeydown} />
-
 <main class="title-screen" class:settings-open={settingsOpen}>
 	<img
 		class="title-background"
@@ -220,16 +241,19 @@
 		<h1 id="title-heading">One Finger Act</h1>
 		<div class="menu-actions" aria-label="Main menu">
 			<button class="start-button" type="button" onclick={startGame}>게임 시작</button>
-			<button class="settings-button" type="button" onclick={openSettings}>환경설정</button>
+			<button bind:this={settingsButton} class="settings-button" type="button" onclick={openSettings}>
+				환경설정
+			</button>
 		</div>
 	</section>
 
 	{#if settingsOpen}
 		<dialog
+			bind:this={settingsDialog}
 			class="settings-backdrop"
-			open
 			aria-modal="true"
 			aria-labelledby="settings-heading"
+			oncancel={handleSettingsCancel}
 			onclick={handleSettingsBackdropClick}
 		>
 			<section class="settings-panel">
@@ -288,6 +312,8 @@
 							onpointerdown={handlePadPointerDown}
 							onpointermove={handlePadPointerMove}
 							onpointerup={handlePadPointerUp}
+							onpointercancel={handlePadPointerCancel}
+							onlostpointercapture={handlePadPointerCancel}
 						>
 							<span>{testFeedback}</span>
 							<small>{testDetail}</small>
