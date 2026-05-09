@@ -27,7 +27,8 @@ Date: 2026-05-09
 - 배경 에셋은 구현 단계에서 `$imagegen` 기본 내장 모드로 생성하고, 최종 파일은 `static/assets/main-menu/` 아래에 저장한다.
 - 구름은 이미지에 고정하지 않고 CSS 레이어로 좌에서 우로 무한 이동한다.
 - 프로젝트 UI 기준을 흩어지지 않게 하기 위해 repo root에 `DESIGN.md`를 추가한다.
-- 프로젝트는 Bun을 사용하므로 검증 명령은 `bun run check`, `bun run test`, `bun run build`, `bun run verify:browser`를 기준으로 한다.
+- `DESIGN.md`는 `npx @google/design.md lint DESIGN.md`로 구조 검증한다.
+- 프로젝트는 Bun을 사용하므로 앱 검증 명령은 `bun run check`, `bun run test`, `bun run build`, `bun run verify:browser`를 기준으로 한다.
 
 ## 사용자 경험
 
@@ -140,6 +141,14 @@ repo root의 `DESIGN.md`는 이후 UI 작업의 기준 문서로 둔다. 이 문
 - 모션: 구름과 오버레이 전환, reduced motion 대응.
 - 금지 요소: 프로토타입 문구, 과한 카드 중첩, 강한 보라/녹색/붉은 광원, 장식용 그라디언트 덩어리.
 
+`DESIGN.md` 작성 후에는 다음 명령이 오류 없이 통과해야 한다.
+
+```bash
+npx @google/design.md lint DESIGN.md
+```
+
+린트 결과는 `errors: 0`이어야 한다. 경고가 나오면 토큰 참조 또는 섹션 구조를 보강해 `warnings: 0`까지 맞춘다. 이 검증은 패키지를 프로젝트 의존성으로 추가하지 않는 일회성 `npx` 실행으로 처리한다.
+
 ## 오류와 폴백
 
 배경 이미지가 로드되지 않아도 화면은 깨지지 않아야 한다. CSS 배경색과 그라디언트 폴백을 둔다.
@@ -158,6 +167,7 @@ repo root의 `DESIGN.md`는 이후 UI 작업의 기준 문서로 둔다. 이 문
 
 프로젝트는 Bun을 기준으로 검증한다.
 
+- `npx @google/design.md lint DESIGN.md`: `DESIGN.md` 구조 검사. `errors: 0`, `warnings: 0`이어야 한다.
 - `bun run check`: Svelte/TypeScript 검사.
 - `bun run test`: 단위 테스트.
 - `bun run build`: 프로덕션 빌드.
