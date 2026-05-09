@@ -10,7 +10,6 @@ const SERVER_HOST = '127.0.0.1';
 const SERVER_PORT = 5173;
 const SERVER_READY_TIMEOUT_MS = 30000;
 const SERVER_POLL_INTERVAL_MS = 250;
-const PLAY_PATHNAME = '/play';
 const START_NAVIGATION_TIMEOUT_MS = 5000;
 const START_RETRY_INTERVAL_MS = 100;
 const LOCAL_SERVER_ARGS = [
@@ -26,7 +25,8 @@ const LOCAL_SERVER_ARGS = [
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const baseURL = process.env.APP_URL ?? DEFAULT_BASE_URL;
 const shouldStartServer = process.env.APP_URL === undefined;
-const homePathname = new URL(baseURL).pathname || '/';
+const homePathname = normalizeHomePathname(new URL(baseURL).pathname || '/');
+const playPathname = `${homePathname === '/' ? '' : homePathname}/play`;
 
 const viewports = [
 	{ name: 'mobile', width: 390, height: 844, touch: true },
@@ -154,7 +154,8 @@ async function verifyViewport(browser, viewport) {
 			page.waitForURL((url) => new URL(url).pathname === homePathname),
 			page.goBack()
 		]);
-		await page.getByRole('button', { name: 'Game Start' }).waitFor({ state: 'visible' });
+		await page.getByRole('button', { name: '게임 시작' }).waitFor({ state: 'visible' });
+		await page.getByRole('button', { name: '환경설정' }).waitFor({ state: 'visible' });
 	} finally {
 		await context.close();
 	}
@@ -167,10 +168,10 @@ async function startGame(page, viewport) {
 	let optionsVerified = false;
 
 	while (Date.now() < deadline) {
-		if (isPathname(page.url(), PLAY_PATHNAME)) return;
+		if (isPathname(page.url(), playPathname)) return;
 
 		const remaining = Math.max(1, deadline - Date.now());
-		const startButton = page.getByRole('button', { name: 'Game Start' });
+		const startButton = page.getByRole('button', { name: '게임 시작' });
 
 		try {
 			await startButton.waitFor({
@@ -203,12 +204,24 @@ async function startGame(page, viewport) {
 
 	const details = lastError instanceof Error ? ` Last error: ${lastError.message}` : '';
 	throw new Error(
-		`Game Start did not navigate to ${PLAY_PATHNAME} within ${START_NAVIGATION_TIMEOUT_MS}ms after ${attempts} attempts. Current URL: ${page.url()}.${details}`
+		`게임 시작 did not navigate to ${playPathname} within ${START_NAVIGATION_TIMEOUT_MS}ms after ${attempts} attempts. Current URL: ${page.url()}.${details}`
 	);
 }
 
 async function selectComfortablePreset(page, viewport, timeoutMs) {
-	const comfortableButton = page.getByRole('button', { name: '편안' });
+	const settingsButton = page.getByRole('button', { name: '환경설정' });
+	await settingsButton.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
+
+	if (viewport.touch) {
+		await settingsButton.tap({ timeout: Math.min(1000, timeoutMs) });
+	} else {
+		await settingsButton.click({ timeout: Math.min(1000, timeoutMs) });
+	}
+
+	const dialog = page.getByRole('dialog', { name: '환경설정' });
+	await dialog.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
+
+	const comfortableButton = dialog.getByRole('button', { name: '편안' });
 	await comfortableButton.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
 
 	if (viewport.touch) {
@@ -217,25 +230,41 @@ async function selectComfortablePreset(page, viewport, timeoutMs) {
 		await comfortableButton.click({ timeout: Math.min(1000, timeoutMs) });
 	}
 
-	const tapControl = page.locator('.option-slider').filter({ hasText: '탭 인식 시간' });
+	const tapControl = dialog.locator('.option-slider').filter({ hasText: '탭 인식 시간' });
 	await tapControl.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
-	await tapControl.getByText('240 ms').waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
+	await tapControl.getByText('240 ms').waitFor({
+		state: 'visible',
+		timeout: Math.min(1000, timeoutMs)
+	});
 	await assert.equal(
 		await tapControl.locator('input[type="range"]').inputValue(),
 		'240',
 		`${viewport.name} comfortable preset should set tap recognition slider to 240 ms`
 	);
+
+	const closeButton = dialog.getByRole('button', { name: '닫기' });
+	if (viewport.touch) {
+		await closeButton.tap({ timeout: Math.min(1000, timeoutMs) });
+	} else {
+		await closeButton.click({ timeout: Math.min(1000, timeoutMs) });
+	}
+	await dialog.waitFor({ state: 'hidden', timeout: Math.min(1000, timeoutMs) });
 }
 
 async function waitForPlayRoute(page, timeoutMs) {
 	try {
-		await page.waitForURL((url) => new URL(url).pathname === PLAY_PATHNAME, {
+		await page.waitForURL((url) => new URL(url).pathname === playPathname, {
 			timeout: timeoutMs
 		});
 		return true;
 	} catch {
-		return isPathname(page.url(), PLAY_PATHNAME);
+		return isPathname(page.url(), playPathname);
 	}
+}
+
+function normalizeHomePathname(pathname) {
+	if (!pathname || pathname === '/') return '/';
+	return pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
 }
 
 function isPathname(url, pathname) {
