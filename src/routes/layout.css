@@ -48,6 +48,17 @@ button {
 
 .title-panel {
 	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+	align-items: center;
+	gap: clamp(20px, 5vw, 56px);
+	width: min(920px, 100%);
+	max-height: calc(100dvh - 48px);
+	overflow: auto;
+	scrollbar-width: thin;
+}
+
+.title-copy {
+	display: grid;
 	gap: 18px;
 	justify-items: center;
 	text-align: center;
@@ -63,7 +74,7 @@ button {
 
 .title-panel h1 {
 	margin: 0;
-	font-size: clamp(3rem, 12vw, 7rem);
+	font-size: clamp(3rem, 10vw, 6.5rem);
 	line-height: 0.9;
 	font-weight: 900;
 }
@@ -77,6 +88,104 @@ button {
 	background: #f6d365;
 	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
 	cursor: pointer;
+}
+
+.options-panel {
+	display: grid;
+	gap: 14px;
+	width: 100%;
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	border-radius: 8px;
+	padding: 14px;
+	background: rgba(10, 13, 12, 0.58);
+	box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+	text-align: left;
+}
+
+.preset-row {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.preset-row button,
+.reset-button {
+	min-height: 36px;
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	border-radius: 8px;
+	color: #f7f3e8;
+	background: rgba(255, 255, 255, 0.08);
+	cursor: pointer;
+}
+
+.preset-row button.active {
+	border-color: rgba(246, 211, 101, 0.9);
+	color: #101312;
+	background: #f6d365;
+}
+
+.slider-list {
+	display: grid;
+	gap: 10px;
+}
+
+.option-slider {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 6px 12px;
+	align-items: center;
+	font-size: 0.86rem;
+	color: #dce6dd;
+}
+
+.option-slider strong {
+	font-size: 0.82rem;
+	font-variant-numeric: tabular-nums;
+	color: #f6d365;
+}
+
+.option-slider input {
+	grid-column: 1 / -1;
+	width: 100%;
+	accent-color: #f6d365;
+}
+
+.options-footer {
+	display: grid;
+	grid-template-columns: 96px minmax(0, 1fr);
+	gap: 10px;
+	align-items: stretch;
+}
+
+.reset-button {
+	font-size: 0.86rem;
+}
+
+.test-pad {
+	display: grid;
+	place-items: center;
+	min-height: 74px;
+	border: 1px dashed rgba(246, 211, 101, 0.5);
+	border-radius: 8px;
+	padding: 10px;
+	color: #f7f3e8;
+	background: rgba(255, 255, 255, 0.06);
+	text-align: center;
+	touch-action: none;
+	user-select: none;
+	cursor: crosshair;
+}
+
+.test-pad span {
+	font-size: 0.95rem;
+	font-weight: 800;
+	line-height: 1.15;
+}
+
+.test-pad small {
+	font-size: 0.72rem;
+	line-height: 1.1;
+	color: #b4c9bb;
 }
 
 .play-screen {
@@ -138,4 +247,35 @@ button {
 	background: rgba(75, 21, 21, 0.86);
 	color: #ffe6e6;
 	pointer-events: none;
+}
+
+@media (max-width: 760px) {
+	.title-screen {
+		align-items: start;
+		padding: 18px;
+	}
+
+	.title-panel {
+		grid-template-columns: 1fr;
+		gap: 18px;
+	}
+
+	.title-copy {
+		gap: 12px;
+	}
+
+	.title-panel h1 {
+		font-size: clamp(2.7rem, 17vw, 4.7rem);
+	}
+
+	.start-button {
+		min-width: 156px;
+		padding: 12px 18px;
+	}
+}
+
+@media (max-width: 380px) {
+	.options-footer {
+		grid-template-columns: 1fr;
+	}
 }

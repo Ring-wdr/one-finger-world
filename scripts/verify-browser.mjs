@@ -164,6 +164,7 @@ async function startGame(page, viewport) {
 	const deadline = Date.now() + START_NAVIGATION_TIMEOUT_MS;
 	let attempts = 0;
 	let lastError = null;
+	let optionsVerified = false;
 
 	while (Date.now() < deadline) {
 		if (isPathname(page.url(), PLAY_PATHNAME)) return;
@@ -176,6 +177,12 @@ async function startGame(page, viewport) {
 				state: 'visible',
 				timeout: Math.min(1000, remaining)
 			});
+
+			if (!optionsVerified) {
+				await selectComfortablePreset(page, viewport, remaining);
+				optionsVerified = true;
+			}
+
 			attempts += 1;
 
 			if (viewport.touch) {
@@ -197,6 +204,26 @@ async function startGame(page, viewport) {
 	const details = lastError instanceof Error ? ` Last error: ${lastError.message}` : '';
 	throw new Error(
 		`Game Start did not navigate to ${PLAY_PATHNAME} within ${START_NAVIGATION_TIMEOUT_MS}ms after ${attempts} attempts. Current URL: ${page.url()}.${details}`
+	);
+}
+
+async function selectComfortablePreset(page, viewport, timeoutMs) {
+	const comfortableButton = page.getByRole('button', { name: '편안' });
+	await comfortableButton.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
+
+	if (viewport.touch) {
+		await comfortableButton.tap({ timeout: Math.min(1000, timeoutMs) });
+	} else {
+		await comfortableButton.click({ timeout: Math.min(1000, timeoutMs) });
+	}
+
+	const tapControl = page.locator('.option-slider').filter({ hasText: '탭 인식 시간' });
+	await tapControl.waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
+	await tapControl.getByText('240 ms').waitFor({ state: 'visible', timeout: Math.min(1000, timeoutMs) });
+	await assert.equal(
+		await tapControl.locator('input[type="range"]').inputValue(),
+		'240',
+		`${viewport.name} comfortable preset should set tap recognition slider to 240 ms`
 	);
 }
 

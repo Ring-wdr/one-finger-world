@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { InputFeedbackEvent, InputGesture } from '$lib/game/types';
-import { InputController, type PointerSurface } from './InputController';
+import { InputController, type InputThresholds, type PointerSurface } from './InputController';
 
 type Listener = (event: PointerEvent) => void;
 type ListenerMap = Record<string, Listener[]>;
@@ -62,14 +62,14 @@ class FakePointerSurface implements PointerSurface {
 	}
 }
 
-function setup() {
+function setup(thresholds?: InputThresholds) {
 	const target = new FakePointerSurface();
 	const gestures: InputGesture[] = [];
 	const feedback: InputFeedbackEvent[] = [];
 	const controller = new InputController(
 		target,
 		(gesture) => gestures.push(gesture),
-		undefined,
+		thresholds,
 		(event) => feedback.push(event)
 	);
 
@@ -304,6 +304,21 @@ describe('InputController', () => {
 		]);
 	});
 
+	it('uses custom tap timing thresholds for existing attack recognition', () => {
+		const { target, gestures } = setup({
+			tapMs: 240,
+			dragStartPx: 14,
+			runDistancePx: 72,
+			fastDragPxPerMs: 0.9,
+			dashWindowMs: 320
+		});
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 10, clientY: 10, timeStamp: 0 });
+		target.fire('pointerup', { pointerId: 1, clientX: 10, clientY: 10, timeStamp: 220 });
+
+		expect(gestures).toEqual([{ type: 'attack', comboStep: 1 }]);
+	});
+
 	it('captures one active pointer and ignores secondary pointers', () => {
 		const { target, gestures } = setup();
 
@@ -328,6 +343,26 @@ describe('InputController', () => {
 		expect(gestures).toEqual([
 			{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } },
 			{ type: 'idle' }
+		]);
+	});
+
+	it('uses custom drag start distance without changing run promotion semantics', () => {
+		const { target, gestures } = setup({
+			tapMs: 180,
+			dragStartPx: 20,
+			runDistancePx: 72,
+			fastDragPxPerMs: 0.9,
+			dashWindowMs: 320
+		});
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 100, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 116, clientY: 100, timeStamp: 40 });
+		target.fire('pointermove', { pointerId: 1, clientX: 121, clientY: 100, timeStamp: 80 });
+		target.fire('pointermove', { pointerId: 1, clientX: 180, clientY: 100, timeStamp: 120 });
+
+		expect(gestures).toEqual([
+			{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } },
+			{ type: 'move', mode: 'run', direction: { x: 1, y: 0 } }
 		]);
 	});
 
@@ -376,6 +411,31 @@ describe('InputController', () => {
 			{ type: 'idle' },
 			{ type: 'move', mode: 'run', direction: { x: 0, y: 1 } },
 			{ type: 'dash', direction: { x: 0, y: 1 } }
+		]);
+	});
+
+	it('uses custom fast drag speed for the existing double-drag dash', () => {
+		const { target, gestures } = setup({
+			tapMs: 180,
+			dragStartPx: 14,
+			runDistancePx: 72,
+			fastDragPxPerMs: 0.6,
+			dashWindowMs: 320
+		});
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
+		target.fire('pointermove', { pointerId: 1, clientX: 60, clientY: 0, timeStamp: 30 });
+		target.fire('pointerup', { pointerId: 1, clientX: 60, clientY: 0, timeStamp: 110 });
+
+		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 180 });
+		target.fire('pointermove', { pointerId: 1, clientX: 60, clientY: 0, timeStamp: 210 });
+		target.fire('pointerup', { pointerId: 1, clientX: 60, clientY: 0, timeStamp: 290 });
+
+		expect(gestures).toEqual([
+			{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } },
+			{ type: 'idle' },
+			{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } },
+			{ type: 'dash', direction: { x: 1, y: 0 } }
 		]);
 	});
 

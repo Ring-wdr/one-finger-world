@@ -16,6 +16,22 @@ class FakeDomElement {
 		this.listeners[type] = (this.listeners[type] ?? []).filter((entry) => entry !== listener);
 	}
 
+	fire(type: string, event: Partial<PointerEvent>) {
+		const sample = {
+			pointerId: 1,
+			clientX: 0,
+			clientY: 0,
+			timeStamp: 0,
+			button: 0,
+			preventDefault: () => undefined,
+			...event
+		} as PointerEvent;
+
+		for (const listener of this.listeners[type] ?? []) {
+			listener(sample);
+		}
+	}
+
 	getBoundingClientRect() {
 		return this.bounds;
 	}
@@ -183,6 +199,41 @@ describe('GameRuntime', () => {
 				thumbScreen: { x: 42, y: 42 }
 			}
 		]);
+
+		runtime.dispose();
+	});
+
+	it('passes configured input thresholds into the input controller', async () => {
+		const { GameRuntime } = await import('./GameRuntime');
+		const actions: ActionState[] = [];
+		const runtime = new GameRuntime({
+			container: createContainer(),
+			inputThresholds: {
+				tapMs: 240,
+				dragStartPx: 20,
+				runDistancePx: 72,
+				fastDragPxPerMs: 0.7,
+				dashWindowMs: 320
+			},
+			onActionStateChange: (state) => actions.push(state),
+			onRuntimeError: () => undefined
+		});
+		const internals = runtime as unknown as RuntimeInternals;
+
+		internals.renderer.domElement.fire('pointerdown', {
+			pointerId: 1,
+			clientX: 20,
+			clientY: 30,
+			timeStamp: 0
+		});
+		internals.renderer.domElement.fire('pointerup', {
+			pointerId: 1,
+			clientX: 20,
+			clientY: 30,
+			timeStamp: 220
+		});
+
+		expect(actions.map((action) => action.label)).toEqual(['Idle', 'Attack 1']);
 
 		runtime.dispose();
 	});

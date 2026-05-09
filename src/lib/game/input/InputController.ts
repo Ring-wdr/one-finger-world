@@ -17,7 +17,7 @@ export interface PointerSurface {
 	releasePointerCapture?(pointerId: number): void;
 }
 
-interface InputThresholds {
+export interface InputThresholds {
 	tapMs: number;
 	dragStartPx: number;
 	runDistancePx: number;
