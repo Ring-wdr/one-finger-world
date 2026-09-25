@@ -25,6 +25,8 @@ const CAMERA_OFFSET = new THREE.Vector3(0, 26, 17);
 const FOLLOW_RATE = 5;
 
 const RARITY_COLOR = { common: 0xcfd8dc, rare: 0x42a5f5, legendary: 0xffca28 } as const;
+/** How strongly a textured loot model glows in its rarity colour. */
+const RARITY_GLOW = 0.3;
 /** Training dummies read as straw-coloured and inert. */
 const DUMMY_COLOR = 0xc9b37e;
 const monsterKey = (m: Monster): AssetKey => `monster${m.tier}`;
@@ -414,10 +416,16 @@ export class Renderer {
 
 	private pickupView(id: number, pos: Vec2, itemId: string): PickupView {
 		const item = getItem(itemId);
-		const opts: InstanceOptions = { color: RARITY_COLOR[item.rarity] };
+		// Primitives take the rarity as their colour; textured models glow with it instead.
+		const opts: InstanceOptions = {
+			variant: item.kind,
+			color: RARITY_COLOR[item.rarity],
+			glow: true
+		};
 		let v = this.pickups.get(id);
 		if (v) {
 			this.refresh(v, v.root, 'pickup', opts);
+			v.model.setGlow(this.glow.setHex(RARITY_COLOR[item.rarity]).multiplyScalar(RARITY_GLOW));
 			return v;
 		}
 		const root = new THREE.Group();
@@ -430,7 +438,7 @@ export class Renderer {
 		root.add(model.object, beam);
 		root.position.copy(toThree(pos));
 		this.scene.add(root);
-		v = { root, model, tag: this.assets.tag('pickup'), beam };
+		v = { root, model, tag: this.assets.tag('pickup', opts.variant), beam };
 		this.pickups.set(id, v);
 		return v;
 	}

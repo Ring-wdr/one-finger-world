@@ -36,6 +36,14 @@ const prop = (node: string, extra: Partial<ModelSpec> = {}): ModelSpec => ({
 	...extra
 });
 
+/** A node of the bundled items file, grounded and lifted to hover like a loot drop. */
+const item = (node: string, extra: Partial<ModelSpec> = {}): ModelSpec => ({
+	url: 'models/props/items.glb',
+	node,
+	yOffset: 0.35,
+	...extra
+});
+
 export const MODEL_MANIFEST: AssetManifest = {
 	// KayKit Adventurers (CC0, Kay Lousberg), built by `bun run assets:characters`, which keeps
 	// one loadout and the Idle/Run/Attack/Hit/Dash clips per class. Picked by equipped weapon id.
@@ -68,5 +76,18 @@ export const MODEL_MANIFEST: AssetManifest = {
 	deadTree: {
 		default: 'medium',
 		variants: Object.fromEntries(['small', 'medium', 'large'].map((v) => [v, prop(`dead_tree_${v}`, { scale: 0.7 })]))
-	}
+	},
+
+	// Loot and projectiles from KayKit Adventurers and Dungeon Remastered (CC0), bundled by
+	// `bun run assets:props`. A pickup shows its item kind (weapons never drop).
+	pickup: {
+		default: 'stat',
+		variants: {
+			stat: item('potion', { height: 0.8 }),
+			skill: item('book_closed', { height: 0.7 }),
+			bridge: item('book_open', { height: 0.7 })
+		}
+	},
+	// Laid along −Z by the build; centred on the flight point.
+	arrow: { url: 'models/props/items.glb', node: 'arrow', anchor: 'origin', scale: 1.3 }
 };
