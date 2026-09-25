@@ -14,8 +14,10 @@ import {
 import { AssetLibrary } from './assets/AssetLibrary';
 import type { ModelInstance } from './assets/ModelInstance';
 import type { AssetKey, InstanceOptions } from './assets/types';
+import { castShadows, Lighting } from './lighting';
 import { createTerrain } from './terrain';
 import { glowTexture, Particles } from './vfx';
+import { ZoneWall } from './zoneWall';
 
 /** sim (x, y) lies on the ground plane; screen-up = sim +y = three −z. */
 const toThree = (p: Vec2, y = 0) => new THREE.Vector3(p.x, y, -p.y);
@@ -115,7 +117,8 @@ export class Renderer {
 	private props: THREE.InstancedMesh[] = [];
 	private propsTag = '';
 
-	private readonly zoneWall: THREE.Mesh;
+	private readonly zoneWall = new ZoneWall();
+	private readonly lighting: Lighting;
 	private readonly nextRing: THREE.Mesh;
 	private readonly playerMarker: THREE.Mesh;
 	/** Tutorial goal: pulsing ground ring + light beam. */
@@ -150,23 +153,17 @@ export class Renderer {
 		this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 		this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+		this.renderer.shadowMap.enabled = true;
+		this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 		this.scene.background = new THREE.Color(0x11151c);
 		this.scene.fog = new THREE.Fog(0x11151c, 60, 130);
 
-		this.scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x2a2f24, 1.6));
-		const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-		sun.position.set(30, 60, 20);
-		this.scene.add(sun);
+		this.lighting = new Lighting(this.scene);
 
 		this.buildGround();
 		this.scene.add(this.particles.points);
 
-		this.zoneWall = new THREE.Mesh(
-			new THREE.CylinderGeometry(1, 1, 14, 128, 1, true),
-			new THREE.MeshBasicMaterial({ color: 0x58a6ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false })
-		);
-		this.zoneWall.position.y = 7;
-		this.scene.add(this.zoneWall);
+		this.scene.add(this.zoneWall.mesh);
 
 		this.nextRing = new THREE.Mesh(
 			new THREE.RingGeometry(0.99, 1, 128).rotateX(-Math.PI / 2),
@@ -231,7 +228,9 @@ export class Renderer {
 
 	private buildGround() {
 		const flat = (g: THREE.BufferGeometry) => g.rotateX(-Math.PI / 2);
-		this.scene.add(createTerrain());
+		const terrain = createTerrain();
+		terrain.receiveShadow = true;
+		this.scene.add(terrain);
 		// Exact ring boundaries: the terrain blends zones, these say where they really change.
 		for (const r of [RING.center, RING.mid, MAP_RADIUS]) {
 			const line = new THREE.Mesh(
@@ -306,6 +305,7 @@ export class Renderer {
 			for (const [variant, matrices] of byVariant) {
 				for (const part of this.assets.instancedParts(key, variant)) {
 					const mesh = new THREE.InstancedMesh(part.geometry, part.material, matrices.length);
+					mesh.castShadow = true;
 					matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
 					this.props.push(mesh);
 					this.scene.add(mesh);
@@ -349,12 +349,19 @@ export class Renderer {
 		bar.group.quaternion.copy(this.camera.quaternion);
 	}
 
+	/** A unit or loot model: these cast shadows (projectiles and effects don't). */
+	private spawn(key: AssetKey, opts: InstanceOptions): ModelInstance {
+		const model = this.assets.instantiate(key, opts);
+		castShadows(model.object);
+		return model;
+	}
+
 	/** Swap in the current model for `key` if it changed since the slot was filled. */
 	private refresh(slot: ModelSlot, parent: THREE.Object3D, key: AssetKey, opts: InstanceOptions) {
 		const tag = this.assets.tag(key, opts.variant);
 		if (slot.tag === tag) return;
 		slot.model.dispose();
-		slot.model = this.assets.instantiate(key, opts);
+		slot.model = this.spawn(key, opts);
 		slot.tag = tag;
 		parent.add(slot.model.object);
 	}
@@ -369,7 +376,7 @@ export class Renderer {
 			return v;
 		}
 		const root = new THREE.Group();
-		const model = this.assets.instantiate('fighter', opts);
+		const model = this.spawn('fighter', opts);
 		const bubble = new THREE.Mesh(this.geo.bubble, this.mat.bubble);
 		bubble.position.y = 0.95;
 		const teamRing = new THREE.Mesh(
@@ -404,7 +411,7 @@ export class Renderer {
 			return v;
 		}
 		const root = new THREE.Group();
-		const model = this.assets.instantiate(key, opts);
+		const model = this.spawn(key, opts);
 		const bar = this.makeBar(m.radius * 1.8, m.radius * 2 + 0.6);
 		root.add(model.object, bar.group);
 		this.scene.add(root);
@@ -429,7 +436,7 @@ export class Renderer {
 			return v;
 		}
 		const root = new THREE.Group();
-		const model = this.assets.instantiate('pickup', opts);
+		const model = this.spawn('pickup', opts);
 		const beam = new THREE.Mesh(
 			this.geo.beam,
 			new THREE.MeshBasicMaterial({ color: TAG_INFO[item.tags[0]].color, transparent: true, opacity: 0.35, depthWrite: false })
@@ -613,9 +620,7 @@ export class Renderer {
 
 		// Zone
 		const z = world.zone;
-		this.zoneWall.scale.set(Math.max(0.01, z.current.radius), 1, Math.max(0.01, z.current.radius));
-		this.zoneWall.position.x = z.current.center.x;
-		this.zoneWall.position.z = -z.current.center.y;
+		this.zoneWall.update({ x: z.current.center.x, z: -z.current.center.y }, z.current.radius, this.clock);
 		const showNext = z.to.radius < z.current.radius - 0.5;
 		this.nextRing.visible = showNext;
 		if (showNext) {
@@ -658,6 +663,7 @@ export class Renderer {
 		}
 		this.camera.position.copy(this.focus).addScaledVector(CAMERA_OFFSET, this.cameraScale);
 		this.camera.lookAt(this.focus);
+		this.lighting.follow(this.focus);
 
 		this.renderer.render(this.scene, this.camera);
 	}
@@ -803,6 +809,7 @@ export class Renderer {
 		this.reset();
 		this.particles.dispose();
 		this.glowTex.dispose();
+		this.zoneWall.dispose();
 		this.assets.dispose();
 		this.renderer.dispose();
 	}
