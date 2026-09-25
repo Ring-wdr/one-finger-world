@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import {
 	getItem,
+	MAP_PROPS,
 	MAP_RADIUS,
+	PROP_VARIANTS,
 	RING,
-	Rng,
 	TAG_INFO,
 	type Fighter,
 	type GameEvent,
@@ -23,6 +24,15 @@ import { ZoneWall } from './zoneWall';
 const toThree = (p: Vec2, y = 0) => new THREE.Vector3(p.x, y, -p.y);
 /** Yaw that points a −Z-forward object along sim direction (dx, dy). */
 const facingAngle = (dx: number, dy: number) => Math.atan2(-dx, dy);
+/** Per-tick step below which a monster keeps its heading, so jitter can't flip it around. */
+const HEADING_MIN_STEP = 0.02;
+/** How fast a monster turns toward its heading (1/s, exponential). */
+const TURN_RATE = 14;
+/** Signed shortest turn from angle `a` to angle `b`, in (−π, π]. */
+const angleDelta = (a: number, b: number) => {
+	const d = (b - a) % (Math.PI * 2);
+	return d > Math.PI ? d - Math.PI * 2 : d <= -Math.PI ? d + Math.PI * 2 : d;
+};
 
 /** Fixed camera angle. It only ever translates (damped) — never rotates, shakes or bobs. */
 const CAMERA_OFFSET = new THREE.Vector3(0, 26, 17);
@@ -69,7 +79,10 @@ interface FighterView extends ModelSlot {
 interface MonsterView extends ModelSlot {
 	root: THREE.Group;
 	bar: Bar;
+	/** Where it wants to face. */
 	heading: number;
+	/** Where it faces now, easing toward `heading`. */
+	yaw: number;
 }
 
 interface PickupView extends ModelSlot {
@@ -249,7 +262,7 @@ export class Renderer {
 	 */
 	private buildProps() {
 		const keys = ['rock', 'tree', 'deadTree'] as const;
-		const variantsOf = (key: AssetKey) => {
+		const variantsOf = (key: AssetKey): (string | undefined)[] => {
 			const vs = this.assets.variants(key);
 			return vs.length ? vs : [undefined];
 		};
@@ -262,43 +275,25 @@ export class Renderer {
 		}
 		this.props = [];
 
-		// Positions keep their original seed; looks (variant, yaw) draw from their own, so adding
-		// variants never moves anything.
-		const rng = new Rng(1234);
-		const look = new Rng(77);
+		// Layout (position, scale, yaw, variant) comes from the sim, which also collides with the
+		// same props, so what blocks a unit is exactly what is drawn.
 		const placed = new Map<AssetKey, Map<string | undefined, THREE.Matrix4[]>>();
-		const put = (key: AssetKey, r: number, angle: number, s: number, yaw: number) => {
-			const vs = variantsOf(key);
-			const v = vs[look.int(vs.length)];
-			const byVariant = placed.get(key) ?? new Map<string | undefined, THREE.Matrix4[]>();
-			placed.set(key, byVariant);
+		const up = new THREE.Vector3(0, 1, 0);
+		for (const p of MAP_PROPS) {
+			const vs = variantsOf(p.kind);
+			const name = PROP_VARIANTS[p.kind][p.variant]?.name;
+			const v = name !== undefined && vs.includes(name) ? name : vs[p.variant % vs.length];
+			const byVariant = placed.get(p.kind) ?? new Map<string | undefined, THREE.Matrix4[]>();
+			placed.set(p.kind, byVariant);
 			const list = byVariant.get(v) ?? [];
 			byVariant.set(v, list);
 			list.push(
 				new THREE.Matrix4().compose(
-					new THREE.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r),
-					new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
-					new THREE.Vector3(s, s, s)
+					toThree(p),
+					new THREE.Quaternion().setFromAxisAngle(up, p.yaw),
+					new THREE.Vector3(p.scale, p.scale, p.scale)
 				)
 			);
-		};
-		for (let i = 0; i < 220; i++) {
-			const r = Math.sqrt(rng.next()) * MAP_RADIUS;
-			const a = rng.range(0, Math.PI * 2);
-			const s = rng.range(0.4, 1.4);
-			put('rock', r, a, s, rng.range(0, 6));
-		}
-		for (let i = 0; i < 160; i++) {
-			const r = RING.mid + rng.next() * (MAP_RADIUS - RING.mid);
-			const a = rng.range(0, Math.PI * 2);
-			put('tree', r, a, rng.range(0.7, 1.3), look.range(0, Math.PI * 2));
-		}
-		// Sparse dead trees in the middle ring: the land withers toward the centre.
-		const dead = new Rng(4321);
-		for (let i = 0; i < 45; i++) {
-			const r = RING.center + dead.next() * (RING.mid - RING.center);
-			const a = dead.range(0, Math.PI * 2);
-			put('deadTree', r, a, dead.range(0.8, 1.2), dead.range(0, Math.PI * 2));
 		}
 
 		for (const [key, byVariant] of placed) {
@@ -416,7 +411,7 @@ export class Renderer {
 		root.add(model.object, bar.group);
 		this.scene.add(root);
 		// Face the camera until it first moves or picks a target.
-		v = { root, model, tag: this.assets.tag(key), bar, heading: Math.PI };
+		v = { root, model, tag: this.assets.tag(key), bar, heading: Math.PI, yaw: Math.PI };
 		this.monsters.set(m.id, v);
 		return v;
 	}
@@ -531,18 +526,22 @@ export class Renderer {
 			const p = lerpPos(m.id, m.pos);
 			v.root.position.copy(toThree(p));
 			const was = prev.get(m.id);
-			const moving = was !== undefined && Math.hypot(m.pos.x - was.x, m.pos.y - was.y) > 1e-4;
-			const target = !moving && m.targetId !== null ? world.fighters.find((f) => f.id === m.targetId) : undefined;
+			const step = was === undefined ? 0 : Math.hypot(m.pos.x - was.x, m.pos.y - was.y);
+			const moving = step > 1e-4;
+			const walking = was !== undefined && step > HEADING_MIN_STEP;
+			const target = !walking && m.targetId !== null ? world.fighters.find((f) => f.id === m.targetId) : undefined;
 			// Face where it walks, or whoever it's standing still to hit.
-			if (moving) v.heading = facingAngle(m.pos.x - was.x, m.pos.y - was.y);
+			if (walking) v.heading = facingAngle(m.pos.x - was.x, m.pos.y - was.y);
 			else if (target) v.heading = facingAngle(target.pos.x - m.pos.x, target.pos.y - m.pos.y);
+			// Stepping from the heading keeps yaw within one turn of it instead of accumulating.
+			v.yaw = v.heading - angleDelta(v.yaw, v.heading) * Math.exp(-TURN_RATE * dt);
 			const obj = v.model.object;
 			if (v.model.isFallback) {
 				// Floating, spinning gem.
 				obj.rotation.y = this.clock * 0.8 + m.id;
 				obj.position.y = m.radius + 0.1 + Math.sin(this.clock * 3 + m.id) * 0.08;
 			} else {
-				obj.rotation.y = v.heading;
+				obj.rotation.y = v.yaw;
 			}
 			const k = hitK(m.id);
 			obj.scale.setScalar(1 + k * 0.25);

@@ -7,7 +7,8 @@ import { deriveStats, modBudget, softCap } from './stats';
 import { createWorld, runHeadless, spawnFighter, step } from './world';
 import { spawnMonster } from './monsters';
 import { createZone, updateZone, ZONE_STAGES } from './zone';
-import { DT } from './types';
+import { DT, type Command } from './types';
+import { dealDamage } from './combat';
 import { dist } from './vec';
 
 describe('soft cap', () => {
@@ -218,5 +219,106 @@ describe('sandbox', () => {
 		bot.pendingDrafts = 0;
 		for (let i = 0; i < 20 * 5; i++) step(world);
 		expect(me.hp).toBeLessThan(me.maxHp);
+	});
+});
+
+describe('monster AI', () => {
+	function sandbox() {
+		const { world, playerId } = createWorld({ seed: 9, fighters: 1, playerName: 'me', sandbox: true });
+		const me = world.fighters.find((f) => f.id === playerId)!;
+		me.offer = null;
+		me.pendingDrafts = 0;
+		return { world, me };
+	}
+	type W = ReturnType<typeof sandbox>['world'];
+	type F = ReturnType<typeof sandbox>['me'];
+
+	/** Steps the world, counting how often the monster's target flips set/unset. */
+	function run(world: W, m: { targetId: number | null }, ticks: number, cmds: () => Command[] = () => []) {
+		let toggles = 0;
+		let had = m.targetId !== null;
+		for (let i = 0; i < ticks; i++) {
+			step(world, new Map([[world.fighters[0].id, cmds()]]));
+			const has = m.targetId !== null;
+			if (has !== had) toggles++;
+			had = has;
+		}
+		return toggles;
+	}
+
+	/** Walk west to x=0 (dragging the monster behind), then stand and swing. */
+	const lure = (me: F) => (): Command[] =>
+		me.pos.x > 0 ? [{ type: 'move', dir: { x: -1, y: 0 }, run: false }] : [{ type: 'move', dir: null, run: false }, { type: 'attack' }];
+
+	it('a monster lured to the leash edge hits a player it can be hit by', () => {
+		const { world, me } = sandbox();
+		me.pos = { x: 13, y: 0 };
+		const m = spawnMonster(world, 1, { x: 17.5, y: 0 }, { hp: 1e6 });
+		const toggles = run(world, m, 20 * 15, lure(me));
+		expect(me.pos.x).toBeLessThanOrEqual(0);
+		expect(m.targetId).toBe(me.id);
+		expect(toggles).toBe(1); // acquired once, never dropped
+		expect(me.hp).toBeLessThan(me.maxHp);
+		expect(m.hp).toBeLessThan(m.maxHp);
+		expect(m.returning).toBe(false);
+	});
+
+	it('breaking the leash resets the monster home without flip-flopping', () => {
+		const { world, me } = sandbox();
+		me.pos = { x: 16, y: 0 };
+		const m = spawnMonster(world, 1, { x: 20, y: 0 }, { hp: 1e6 });
+		const toggles = run(world, m, 20 * 20, lure(me));
+		expect(toggles).toBe(2); // acquired once, dropped once at the leash
+		expect(m.returning).toBe(false);
+		expect(m.targetId).toBeNull();
+		expect(dist(m.pos, m.home)).toBeLessThan(4);
+		expect(m.hp).toBe(m.maxHp);
+	});
+
+	it('keeps chasing a ranged fighter instead of oscillating', () => {
+		const { world, me } = sandbox();
+		me.build = summarizeBuild(['hunting_bow']);
+		me.pos = { x: 4, y: 0 };
+		const m = spawnMonster(world, 1, { x: 8, y: 0 }, { hp: 1e6 });
+		const toggles = run(world, m, 20 * 5);
+		expect(toggles).toBe(1);
+		expect(me.hp).toBeLessThan(me.maxHp);
+	});
+
+	it('an idle monster stays near home and never regenerates', () => {
+		const { world, me } = sandbox();
+		me.pos = { x: -60, y: 0 };
+		const m = spawnMonster(world, 2, { x: 30, y: 0 });
+		m.hp = m.maxHp * 0.5;
+		let moved = 0;
+		for (let i = 0; i < 20 * 60; i++) {
+			step(world);
+			expect(m.returning).toBe(false);
+			expect(dist(m.pos, m.home)).toBeLessThanOrEqual(3 + 1e-6);
+			moved = Math.max(moved, dist(m.pos, m.home));
+		}
+		expect(m.hp).toBe(m.maxHp * 0.5);
+		expect(moved).toBeGreaterThan(0.5);
+	});
+
+	it('a returning monster regenerates and ignores hits', () => {
+		const { world, me } = sandbox();
+		me.pos = { x: 22, y: 0 };
+		const m = spawnMonster(world, 1, { x: 0, y: 0 }, { hp: 1000 });
+		m.pos = { x: 20, y: 0 };
+		m.hp = 100;
+		m.returning = true;
+		step(world);
+		dealDamage(world, me, m, 10);
+		expect(m.targetId).toBeNull();
+		const hpAfterHit = m.hp;
+		for (let i = 0; i < 20; i++) step(world);
+		expect(m.returning).toBe(true);
+		expect(m.targetId).toBeNull();
+		expect(m.hp).toBeGreaterThan(hpAfterHit);
+		expect(me.hp).toBe(me.maxHp);
+		for (let i = 0; i < 20 * 10; i++) step(world);
+		expect(m.returning).toBe(false);
+		expect(m.hp).toBe(m.maxHp);
 	});
 });

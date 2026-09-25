@@ -16,6 +16,8 @@ import {
 import { isOfferable, phaseAt, rollOffer } from './draft';
 import { getItem, WEAPON_IDS } from './items';
 import { spawnMonsters, updateMonster } from './monsters';
+import { newNav } from './nav';
+import { clearSpot, moveWithCollision, resolveObstacles } from './obstacles';
 import { Rng } from './rng';
 import { newStatus } from './status';
 import { TAGS } from './tags';
@@ -26,7 +28,7 @@ import {
 	type Fighter,
 	type World
 } from './types';
-import { add, clampToCircle, copy, dist, fromAngle, normalize, scale } from './vec';
+import { clampToCircle, copy, dist, fromAngle, normalize, scale } from './vec';
 import { createZone, isInside, updateZone } from './zone';
 
 const BOT_NAMES = [
@@ -112,9 +114,11 @@ export interface SpawnFighterOptions {
 export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
 	const build = summarizeBuild([]);
 	const rng = world.rng;
+	const id = world.nextId++;
+	const pos = clearSpot(o.pos, 0.7 + 0.1);
 	const f: Fighter = {
 		kind: 'fighter',
-		id: world.nextId++,
+		id,
 		name: o.name,
 		color: o.color,
 		bot: o.bot
@@ -124,17 +128,19 @@ export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
 					thinkTimer: rng.next() * 0.3,
 					targetId: null,
 					goal: null,
+					goalTimer: 0,
 					mode: 'roam',
 					aggressive: o.aggressive ?? false
 				}
 			: null,
-		pos: copy(o.pos),
+		nav: newNav(id, pos),
+		pos,
 		radius: 0.7,
 		hp: build.stats.maxHp,
 		maxHp: build.stats.maxHp,
 		alive: true,
 		status: newStatus(),
-		facing: normalize({ x: -o.pos.x, y: -o.pos.y }),
+		facing: normalize({ x: -pos.x, y: -pos.y }),
 		moveDir: null,
 		running: false,
 		level: 1,
@@ -214,6 +220,18 @@ export function equip(world: World, f: Fighter, id: string) {
 	if (getItem(id).kind === 'weapon') f.items = f.items.filter((x) => getItem(x).kind !== 'weapon');
 	f.items.push(id);
 	applyBuild(world, f);
+	revalidateOffer(world, f);
+}
+
+/**
+ * Items gained outside the draft (pickups, scripted equips) can make an open offer's entries
+ * un-draftable (owned skill/bridge/weapon, skill cap). Replace just those, free of rerolls.
+ */
+export function revalidateOffer(world: World, f: Fighter) {
+	if (!f.offer) return;
+	const valid = f.offer.filter((id) => isOfferable(getItem(id), f.items));
+	if (valid.length === f.offer.length) return;
+	f.offer = rollOffer(world.rng, world.phase, f.items, valid);
 }
 
 function updateFighter(world: World, f: Fighter) {
@@ -239,11 +257,14 @@ function updateFighter(world: World, f: Fighter) {
 	} else {
 		if (f.moveDir && f.rootTime <= 0) {
 			const speed = s.moveSpeed * (f.running ? 1 : 0.55);
-			f.pos = add(f.pos, scale(f.moveDir, speed * DT));
+			// Everyone (the player too) slides along obstacles; only AI steers around them.
+			f.pos = moveWithCollision(f.pos, scale(f.moveDir, speed * DT), f.radius);
 			f.facing = copy(f.moveDir);
 		}
 		if (f.attackQueued > 0 && f.attackCd <= 0) performAttack(world, f);
 	}
+	// Guard reflect can kill the attacker mid-update (in a dash hit or a basic attack).
+	if (!f.alive) return;
 	f.pos = clampToCircle(f.pos, { x: 0, y: 0 }, MAP_RADIUS);
 	castSkills(world, f);
 }
@@ -268,8 +289,8 @@ function onPhaseChange(world: World) {
 		if (!f.alive) continue;
 		f.rerolls += 1;
 		f.exchangeTokens += 1;
-		// Banked drafts re-roll into the new phase's resource type.
-		if (f.offer) f.offer = rollOffer(world.rng, world.phase, f.items);
+		// Banked drafts re-roll into the new phase's resource type (not the opening weapon pick).
+		if (f.offer && f.build.weapon) f.offer = rollOffer(world.rng, world.phase, f.items);
 	}
 }
 
@@ -304,6 +325,8 @@ export function step(world: World, commands?: ReadonlyMap<number, readonly Comma
 	for (const m of world.monsters) if (m.alive) updateMonster(world, m);
 
 	updateProjectiles(world);
+	// Knockback (from melee or projectiles) can shove a monster into a rock.
+	for (const m of world.monsters) if (m.alive) m.pos = resolveObstacles(m.pos, m.radius);
 	for (const f of world.fighters) if (f.alive) tickStatuses(world, f);
 	for (const m of world.monsters) if (m.alive) tickStatuses(world, m);
 

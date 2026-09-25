@@ -48,14 +48,20 @@ export function isOfferable(item: ItemDef, owned: readonly string[]) {
 	return true;
 }
 
-export function rollOffer(rng: Rng, phase: MatchPhase, owned: readonly string[]): string[] {
+/** `keep`: entries already in the offer; only the remaining slots are rolled. */
+export function rollOffer(
+	rng: Rng,
+	phase: MatchPhase,
+	owned: readonly string[],
+	keep: readonly string[] = []
+): string[] {
 	const counts = emptyTagCounts();
 	for (const id of owned) for (const t of getItem(id).tags) counts[t] += 1;
 
 	const weights = PHASE_WEIGHTS[phase];
-	const offer: string[] = [];
+	const offer: string[] = [...keep];
 
-	for (let i = 0; i < OFFER_SIZE; i++) {
+	while (offer.length < OFFER_SIZE) {
 		const candidates = ITEMS.filter((it) => !offer.includes(it.id) && isOfferable(it, owned));
 		const byBucket = new Map<Bucket, ItemDef[]>();
 		for (const it of candidates) {

@@ -1,4 +1,5 @@
 import {
+	clearSpot,
 	createWorld,
 	dist,
 	equip,
@@ -323,7 +324,8 @@ export class Tutorial {
 	}
 
 	markAt(pos: Vec2, radius = 1.8) {
-		this.marker = { pos: { ...pos }, radius };
+		// Never inside a rock: the player must be able to stand on the marker.
+		this.marker = { pos: clearSpot(pos, 0.9), radius };
 	}
 
 	atMarker() {

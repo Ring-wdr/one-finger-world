@@ -1,16 +1,18 @@
 import { summarizeBuild, usesRangedBasic } from './build';
 import { rollOffer } from './draft';
 import { getItem, SKILLS, type SkillId } from './items';
+import { moveWithCollision } from './obstacles';
 import { TAGS } from './tags';
 import {
 	DT,
+	MAP_RADIUS,
 	type Fighter,
 	type GameEvent,
 	type Projectile,
 	type Unit,
 	type World
 } from './types';
-import { add, copy, dist, dist2, dot, normalize, rotate, scale, sub, type Vec2 } from './vec';
+import { add, clampToCircle, copy, dist, dist2, dot, normalize, rotate, scale, sub, type Vec2 } from './vec';
 
 export const DASH_TIME = 0.18;
 export const DASH_DISTANCE = 6;
@@ -168,8 +170,11 @@ export function dealDamage(
 
 	if (sf && !o.dot) heal(sf, amount * sf.build.stats.lifesteal);
 	if (sf) applyStatuses(sf, target, o);
-	if (target.kind === 'monster' && sf) target.targetId = sf.id;
-	if (o.knock && target.kind === 'monster') target.pos = add(target.pos, o.knock);
+	if (target.kind === 'monster' && sf && !target.returning) target.targetId = sf.id;
+	// Obstacles are resolved at the end of the tick (world.step); the map edge is clamped here.
+	if (o.knock && target.kind === 'monster') {
+		target.pos = clampToCircle(add(target.pos, o.knock), { x: 0, y: 0 }, MAP_RADIUS);
+	}
 
 	if (tf && src && src !== tf && !o.dot && !o.reflected && tf.build.tiers.guard >= 2) {
 		dealDamage(world, tf, src, raw * GUARD_REFLECT, { reflected: true });
@@ -184,9 +189,12 @@ function applyStatuses(sf: Fighter, target: Unit, o: HitOpts) {
 	const tiers = sf.build.tiers;
 	if ((o.onHit && tiers.fire >= 1) || o.forceBurn) {
 		const dps = sf.build.stats.damage * 0.3 * (tiers.fire >= 2 ? 2 : 1);
-		s.burnDps = Math.max(s.burnTime > 0 ? s.burnDps : 0, dps);
+		// The stronger burn wins and keeps its owner; any hit refreshes the duration.
+		if (s.burnTime <= 0 || dps >= s.burnDps) {
+			s.burnDps = dps;
+			s.burnSrc = sf.id;
+		}
 		s.burnTime = 3;
-		s.burnSrc = sf.id;
 	}
 	if ((o.onHit && tiers.bleed >= 1) || o.forceBleed) {
 		const max = tiers.bleed >= 2 ? 16 : 8;
@@ -221,12 +229,15 @@ export function killUnit(world: World, victim: Unit, src: Unit | null) {
 		pos: copy(victim.pos)
 	};
 	world.events.push(event);
+	// A dead fighter's in-flight projectiles and DoTs can still finish a kill: the death event
+	// keeps crediting them (accurate kill feed), but they gain no kills, xp or on-kill effects.
+	const rewarded = killer?.alive ? killer : null;
 
 	if (victim.kind === 'monster') {
-		if (killer) {
-			gainXp(world, killer, victim.xp);
-			if (killer.build.tiers.fire >= 2 && victim.status.burnTime > 0) {
-				explode(world, killer, victim.pos, 3, killer.build.stats.damage * 0.6);
+		if (rewarded) {
+			gainXp(world, rewarded, victim.xp);
+			if (rewarded.build.tiers.fire >= 2 && victim.status.burnTime > 0) {
+				explode(world, rewarded, victim.pos, 3, rewarded.build.stats.damage * 0.6);
 			}
 		}
 		return;
@@ -234,9 +245,9 @@ export function killUnit(world: World, victim: Unit, src: Unit | null) {
 
 	victim.placement = world.fighters.filter((f) => f.alive).length + 1;
 	victim.moveDir = null;
-	if (killer) {
-		killer.kills += 1;
-		gainXp(world, killer, 25 + victim.level * 4);
+	if (rewarded) {
+		rewarded.kills += 1;
+		gainXp(world, rewarded, 25 + victim.level * 4);
 	}
 	// Exactly one random piece of the victim's build drops, never the whole thing (and never the weapon).
 	const droppable = victim.items.filter((id) => getItem(id).kind !== 'weapon');
@@ -274,7 +285,11 @@ export function startDash(world: World, f: Fighter, dir: Vec2) {
 }
 
 export function updateDash(world: World, f: Fighter) {
-	f.pos = add(f.pos, scale(f.dashDir, (DASH_DISTANCE / DASH_TIME) * DT));
+	// DASH_TIME isn't a whole number of ticks: the last tick only covers what's left, so the
+	// total is exactly DASH_DISTANCE. Dashes slide along obstacles but never steer around them.
+	const speed = DASH_DISTANCE / DASH_TIME;
+	const step = speed * Math.min(DT, Math.max(0, f.dashTime));
+	f.pos = moveWithCollision(f.pos, scale(f.dashDir, step), f.radius);
 	if (f.build.skills.includes('flashStep')) {
 		for (const e of enemiesOf(world, f)) {
 			if (f.dashHit.includes(e.id) || dist(e.pos, f.pos) > 1.8 + e.radius) continue;
@@ -345,6 +360,8 @@ export function spawnProjectile(
 		owner: owner.id,
 		kind,
 		pos: add(owner.pos, scale(dir, owner.radius + 0.2)),
+		// The first sweep starts inside the shooter so point-blank targets can't be skipped.
+		sweepFrom: copy(owner.pos),
 		vel: scale(dir, speed),
 		life,
 		radius: kind === 'fireball' ? 0.45 : 0.25,
@@ -425,9 +442,32 @@ function castSkill(world: World, f: Fighter, skill: SkillId): boolean {
 
 // ── Projectiles & statuses
 
+/**
+ * Earliest t in [0, 1] at which a circle of radius `r` moving from `a` by `d` touches the
+ * point `c`, or -1 if it never does.
+ */
+export function sweepCircle(a: Vec2, d: Vec2, c: Vec2, r: number): number {
+	const fx = a.x - c.x;
+	const fy = a.y - c.y;
+	const cc = fx * fx + fy * fy - r * r;
+	if (cc <= 0) return 0;
+	const aa = d.x * d.x + d.y * d.y;
+	if (aa <= 1e-12) return -1;
+	const bb = 2 * (fx * d.x + fy * d.y);
+	if (bb >= 0) return -1; // moving away
+	const disc = bb * bb - 4 * aa * cc;
+	if (disc < 0) return -1;
+	const t = (-bb - Math.sqrt(disc)) / (2 * aa);
+	return t <= 1 ? t : -1;
+}
+
 export function updateProjectiles(world: World) {
 	for (const p of world.projectiles) {
+		// Swept test over this tick's whole path, so fast shots can't tunnel or skip
+		// point-blank targets.
+		const from = p.sweepFrom;
 		p.pos = add(p.pos, scale(p.vel, DT));
+		p.sweepFrom = copy(p.pos);
 		p.life -= DT;
 		if (p.life <= 0) continue;
 		const owner = unitById(world, p.owner);
@@ -435,17 +475,28 @@ export function updateProjectiles(world: World) {
 			p.life = 0;
 			continue;
 		}
+		const path = sub(p.pos, from);
+		const hits: { e: Unit; t: number }[] = [];
+		// enemiesOf excludes the owner, so a shot can never hit its shooter.
 		for (const e of enemiesOf(world, owner)) {
 			if (p.hit.includes(e.id)) continue;
-			if (dist2(p.pos, e.pos) > (e.radius + p.radius) ** 2) continue;
+			const t = sweepCircle(from, path, e.pos, e.radius + p.radius);
+			if (t >= 0) hits.push({ e, t });
+		}
+		hits.sort((a, b) => a.t - b.t); // stable: ties keep enemiesOf order
+		for (const { e, t } of hits) {
+			if (!e.alive) continue;
 			if (p.aoe > 0) {
-				explode(world, owner, p.pos, p.aoe, p.damage, { canCrit: true, onHit: true, forceBurn: p.forceBurn });
+				const at = add(from, scale(path, t));
+				p.pos = at;
+				explode(world, owner, at, p.aoe, p.damage, { canCrit: true, onHit: true, forceBurn: p.forceBurn });
 				p.life = 0;
 				break;
 			}
 			p.hit.push(e.id);
 			dealDamage(world, owner, e, p.damage, { canCrit: true, onHit: true, forceBurn: p.forceBurn });
 			if (--p.pierce < 0) {
+				p.pos = add(from, scale(path, t));
 				p.life = 0;
 				break;
 			}
