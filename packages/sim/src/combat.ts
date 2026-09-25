@@ -168,7 +168,7 @@ export function dealDamage(
 
 	if (sf && !o.dot) heal(sf, amount * sf.build.stats.lifesteal);
 	if (sf) applyStatuses(sf, target, o);
-	if (target.kind === 'monster' && sf) target.targetId = sf.id;
+	if (target.kind === 'monster' && sf && !target.returning) target.targetId = sf.id;
 	if (o.knock && target.kind === 'monster') target.pos = add(target.pos, o.knock);
 
 	if (tf && src && src !== tf && !o.dot && !o.reflected && tf.build.tiers.guard >= 2) {

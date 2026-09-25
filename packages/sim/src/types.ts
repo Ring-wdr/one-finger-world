@@ -106,6 +106,13 @@ export interface Monster extends UnitBase {
 	speed: number;
 	xp: number;
 	wander: Vec2;
+	/** Seconds left before the idle wander point is rerolled even if unreached. */
+	wanderTimer: number;
+	/**
+	 * Leash reset: set when the monster loses its chase far from home. While
+	 * returning it ignores aggro and hits, walks home and regenerates.
+	 */
+	returning: boolean;
 	/** Training dummy: never moves, attacks or heals. */
 	passive: boolean;
 }
