@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { glowTexture } from '../vfx';
 import type { AssetKey, FallbackBuild, InstanceOptions } from './types';
 
 /** Prototype primitives, used until (or instead of) a real model. Geometry is shared. */
@@ -15,7 +16,8 @@ const geo = {
 	monster2: lazy(() => new THREE.DodecahedronGeometry(0.85, 0)),
 	monster3: lazy(() => new THREE.OctahedronGeometry(1.2, 0)),
 	arrow: lazy(() => new THREE.BoxGeometry(0.12, 0.12, 0.9)),
-	fireball: lazy(() => new THREE.SphereGeometry(0.45, 12, 10)),
+	fireballCore: lazy(() => new THREE.SphereGeometry(0.22, 12, 10)),
+	fireball: lazy(() => new THREE.IcosahedronGeometry(0.42, 1)),
 	pickup: lazy(() => new THREE.BoxGeometry(0.6, 0.6, 0.6)),
 	// Squashed and half-buried, as the old per-instance transform did.
 	rock: lazy(() => new THREE.DodecahedronGeometry(0.8, 0).scale(1, 0.7, 1).translate(0, 0.2, 0)),
@@ -26,7 +28,13 @@ const geo = {
 const mat = {
 	nose: lazy(() => new THREE.MeshStandardMaterial({ color: 0x222831 })),
 	arrow: lazy(() => new THREE.MeshBasicMaterial({ color: 0xe8f1ff })),
-	fireball: lazy(() => new THREE.MeshBasicMaterial({ color: 0xff8a3d })),
+	fireballCore: lazy(() => new THREE.MeshBasicMaterial({ color: 0xfff1c1 })),
+	fireball: lazy(
+		() => new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false })
+	),
+	fireballGlow: lazy(
+		() => new THREE.SpriteMaterial({ map: glowTexture(), color: 0xff6a10, blending: THREE.AdditiveBlending, depthWrite: false })
+	),
 	rock: lazy(() => new THREE.MeshStandardMaterial({ color: 0x6d7580, roughness: 1, flatShading: true })),
 	tree: lazy(() => new THREE.MeshStandardMaterial({ color: 0x3f7a4a, roughness: 1, flatShading: true })),
 	deadTree: lazy(() => new THREE.MeshStandardMaterial({ color: 0x4a3b30, roughness: 1, flatShading: true }))
@@ -56,7 +64,13 @@ export const FALLBACKS: Record<AssetKey, (o: InstanceOptions) => FallbackBuild> 
 	monster2: monster('monster2'),
 	monster3: monster('monster3'),
 	arrow: () => shared(new THREE.Mesh(geo.arrow(), mat.arrow())),
-	fireball: () => shared(new THREE.Mesh(geo.fireball(), mat.fireball())),
+	// White-hot core inside a flickering flame shell, with a soft glow around it.
+	fireball: () => {
+		const glow = new THREE.Sprite(mat.fireballGlow());
+		glow.scale.setScalar(2.2);
+		const obj = wrap(new THREE.Mesh(geo.fireballCore(), mat.fireballCore()), new THREE.Mesh(geo.fireball(), mat.fireball()), glow);
+		return { object: obj, glow: [], owned: [] };
+	},
 	pickup: (o) => {
 		const color = o.color ?? 0xcfd8dc;
 		const m = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5 });

@@ -14,6 +14,8 @@ import {
 import { AssetLibrary } from './assets/AssetLibrary';
 import type { ModelInstance } from './assets/ModelInstance';
 import type { AssetKey, InstanceOptions } from './assets/types';
+import { createTerrain } from './terrain';
+import { glowTexture, Particles } from './vfx';
 
 /** sim (x, y) lies on the ground plane; screen-up = sim +y = three −z. */
 const toThree = (p: Vec2, y = 0) => new THREE.Vector3(p.x, y, -p.y);
@@ -36,6 +38,8 @@ const CORPSE_HOLD = 1.2;
 const CORPSE_SINK = 0.8;
 const CORPSE_DEPTH = 1.5;
 const NO_GLOW = new THREE.Color(0, 0, 0);
+/** Fire, hottest first: trail embers and explosion sparks cycle through these. */
+const FIRE = [0xfff1c1, 0xffc35a, 0xff8a2a, 0xff5a10].map((c) => new THREE.Color(c));
 
 interface Bar {
 	group: THREE.Group;
@@ -99,6 +103,8 @@ export class Renderer {
 	private readonly fighters = new Map<number, FighterView>();
 	private readonly monsters = new Map<number, MonsterView>();
 	private readonly projectiles = new Map<number, ModelInstance>();
+	/** Projectile ids that are fireballs, so their disappearance gets an impact puff. */
+	private readonly fireballs = new Set<number>();
 	private readonly pickups = new Map<number, PickupView>();
 	private readonly hitAt = new Map<number, number>();
 	/** Units whose `death` event arrived since the last render. */
@@ -131,6 +137,8 @@ export class Renderer {
 		bubble: new THREE.MeshBasicMaterial({ color: 0x9fd4ff, transparent: true, opacity: 0.18, depthWrite: false })
 	};
 	private readonly glow = new THREE.Color();
+	private readonly particles = new Particles(1024);
+	private readonly glowTex = glowTexture();
 
 	constructor(
 		canvas: HTMLCanvasElement,
@@ -151,6 +159,7 @@ export class Renderer {
 		this.scene.add(sun);
 
 		this.buildGround();
+		this.scene.add(this.particles.points);
 
 		this.zoneWall = new THREE.Mesh(
 			new THREE.CylinderGeometry(1, 1, 14, 128, 1, true),
@@ -207,10 +216,12 @@ export class Renderer {
 		for (const e of this.fx) this.scene.remove(e.obj);
 		for (const c of this.corpses) c.remove();
 		this.corpses = [];
+		this.particles.clear();
 		this.dying.clear();
 		this.fighters.clear();
 		this.monsters.clear();
 		this.projectiles.clear();
+		this.fireballs.clear();
 		this.pickups.clear();
 		this.hitAt.clear();
 		this.fx = [];
@@ -220,15 +231,8 @@ export class Renderer {
 
 	private buildGround() {
 		const flat = (g: THREE.BufferGeometry) => g.rotateX(-Math.PI / 2);
-		const zones: [number, number, number][] = [
-			[0, RING.center, 0x4a2e2e],
-			[RING.center, RING.mid, 0x46432f],
-			[RING.mid, MAP_RADIUS, 0x2f4634]
-		];
-		for (const [r0, r1, color] of zones) {
-			const g = r0 === 0 ? new THREE.CircleGeometry(r1, 96) : new THREE.RingGeometry(r0, r1, 96);
-			this.scene.add(new THREE.Mesh(flat(g), new THREE.MeshStandardMaterial({ color, roughness: 1 })));
-		}
+		this.scene.add(createTerrain());
+		// Exact ring boundaries: the terrain blends zones, these say where they really change.
 		for (const r of [RING.center, RING.mid, MAP_RADIUS]) {
 			const line = new THREE.Mesh(
 				flat(new THREE.RingGeometry(r - 0.25, r + 0.25, 128)),
@@ -237,11 +241,6 @@ export class Renderer {
 			line.position.y = 0.02;
 			this.scene.add(line);
 		}
-		const outside = new THREE.Mesh(
-			flat(new THREE.RingGeometry(MAP_RADIUS, MAP_RADIUS + 200, 64)),
-			new THREE.MeshStandardMaterial({ color: 0x1a2027, roughness: 1 })
-		);
-		this.scene.add(outside);
 		this.buildProps();
 	}
 
@@ -321,6 +320,7 @@ export class Renderer {
 		// Portrait phones: pull back so roughly the same ground width stays visible.
 		this.cameraScale = Math.max(1, 0.95 / this.camera.aspect);
 		this.camera.updateProjectionMatrix();
+		this.particles.setViewport(height * this.renderer.getPixelRatio(), this.camera.fov);
 	}
 
 	private makeBar(width: number, y: number): Bar {
@@ -577,12 +577,16 @@ export class Renderer {
 				model = this.assets.instantiate(pr.kind);
 				this.scene.add(model.object);
 				this.projectiles.set(pr.id, model);
+				if (pr.kind === 'fireball') this.fireballs.add(pr.id);
 			}
 			model.object.position.copy(toThree(lerpPos(pr.id, pr.pos), 1.1));
 			model.object.rotation.y = facingAngle(pr.vel.x, pr.vel.y);
+			if (pr.kind === 'fireball') this.fireballFx(model.object, pr.id, pr.vel, dt);
 		}
 		for (const [id, model] of this.projectiles) {
 			if (seen.has(id)) continue;
+			// Basic fireballs don't explode (no AoE), but shouldn't just blink out either.
+			if (this.fireballs.delete(id)) this.particles.burst(model.object.position, 14, 2.5, FIRE);
 			model.dispose();
 			this.projectiles.delete(id);
 		}
@@ -600,6 +604,7 @@ export class Renderer {
 		}
 
 		this.buildProps();
+		this.particles.update(dt);
 
 		if (this.goal.visible) {
 			const pulse = 1 + Math.sin(this.clock * 4) * 0.06;
@@ -631,6 +636,8 @@ export class Renderer {
 					if (o instanceof THREE.Mesh) {
 						o.geometry.dispose();
 						(o.material as THREE.Material).dispose();
+					} else if (o instanceof THREE.Sprite) {
+						o.material.dispose();
 					}
 				});
 				return false;
@@ -660,6 +667,39 @@ export class Renderer {
 		if (v.z > 1) return null;
 		const el = this.renderer.domElement;
 		return { x: ((v.x + 1) / 2) * el.clientWidth, y: ((1 - v.y) / 2) * el.clientHeight };
+	}
+
+	/** Flicker, and shed embers behind it along its flight. */
+	private fireballFx(obj: THREE.Object3D, id: number, vel: Vec2, dt: number) {
+		obj.scale.setScalar(1 + Math.sin(this.clock * 38 + id) * 0.1);
+		const back = new THREE.Vector3(-vel.x, 0, vel.y).normalize();
+		const p = new THREE.Vector3();
+		const v = new THREE.Vector3();
+		// ~150 embers a second, spread along the frame's travel so the trail stays continuous.
+		const count = Math.max(2, Math.round(dt * 150));
+		const step = new THREE.Vector3(vel.x, 0, -vel.y).multiplyScalar(dt / count);
+		for (let i = 0; i < count; i++) {
+			p.copy(obj.position)
+				.addScaledVector(step, -i)
+				.add(v.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.3));
+			v.copy(back).multiplyScalar(0.8 + Math.random() * 1.2).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.4, (Math.random() - 0.5) * 0.6));
+			this.particles.emit(p, v, 0.35 + Math.random() * 0.25, 0.6 + Math.random() * 0.45, FIRE[1 + (i % 3)]);
+		}
+	}
+
+	/** Bright flash that swells and fades, plus sparks — fireball impacts and death blasts. */
+	private explosionFx(at: Vec2, radius: number) {
+		const flash = new THREE.Sprite(
+			new THREE.SpriteMaterial({ map: this.glowTex, color: 0xffb347, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })
+		);
+		flash.position.copy(toThree(at, 0.9));
+		const mat = flash.material;
+		this.addFx(flash, 0.28, (k) => {
+			// The glow texture falls off steeply, so the sprite spans well past the blast radius.
+			flash.scale.setScalar(radius * (2 + 1.8 * k));
+			mat.opacity = 1 - k * k;
+		});
+		this.particles.burst(toThree(at, 0.6), Math.round(24 + radius * 10), 3 + radius * 2.2, FIRE);
 	}
 
 	private addFx(obj: THREE.Object3D, duration: number, tick: (k: number) => void) {
@@ -699,6 +739,7 @@ export class Renderer {
 				case 'skill':
 				case 'explode': {
 					if (e.radius <= 0) break;
+					if (e.type === 'explode') this.explosionFx(e.pos, e.radius);
 					const color = e.type === 'explode' ? 0xff7a33 : 0xb39ddb;
 					const mesh = this.groundRing(e.pos, 0.85, 1, color);
 					const mat = mesh.material as THREE.MeshBasicMaterial;
@@ -760,6 +801,8 @@ export class Renderer {
 
 	dispose() {
 		this.reset();
+		this.particles.dispose();
+		this.glowTex.dispose();
 		this.assets.dispose();
 		this.renderer.dispose();
 	}
