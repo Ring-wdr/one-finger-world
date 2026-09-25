@@ -3,7 +3,8 @@
  *
  *   bun run assets:characters <dir> [<dir> …]
  *
- * Each dir is a pack's `Characters/gltf` folder; characters whose source isn't found are skipped.
+ * Each dir is a pack's `Characters/gltf` (or, for attached weapons, `Assets/gltf`) folder;
+ * characters whose source isn't found are skipped.
  *   Fighters: https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0
  *   Monsters: https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0
  *
@@ -11,9 +12,9 @@
  * one loadout the game shows, the clips the renderer plays (renamed to Idle/Run/Attack/Hit/Dash/Death
  * so they auto-map), then quantise + meshopt-compress.
  */
-import { NodeIO } from '@gltf-transform/core';
+import { NodeIO, type Node, type Scene, type vec3, type vec4 } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { dedup, meshopt, prune, resample } from '@gltf-transform/functions';
+import { dedup, meshopt, mergeDocuments, prune, resample, unpartition } from '@gltf-transform/functions';
 import { MeshoptEncoder } from 'meshoptimizer';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,8 +24,21 @@ interface Character {
 	out: string;
 	/** Weapon/prop meshes to keep; the class's other hand-slot meshes are dropped. */
 	keep: string[];
+	/** Separate prop files to parent onto a hand slot (the Skeletons pack ships weapons apart). */
+	attach?: Attachment[];
 	clips: Record<'Idle' | 'Run' | 'Attack' | 'Hit' | 'Dash' | 'Death', string>;
 }
+
+interface Attachment {
+	file: string;
+	slot: 'handslot.l' | 'handslot.r';
+	translation: vec3;
+	rotation?: vec4;
+}
+
+/** Offsets the Adventurers pack uses for props on the hand slots both packs' rigs share. */
+const RIGHT_HAND: Omit<Attachment, 'file'> = { slot: 'handslot.r', translation: [0, 0.033, 0], rotation: [0, -1, 0, 0] };
+const LEFT_SHIELD: Omit<Attachment, 'file'> = { slot: 'handslot.l', translation: [0, 0.017, 0.156] };
 
 /** Meshes parented to these bones are loadout props. Hats and capes (head/chest) always stay. */
 const PROP_SLOTS = new Set(['handslot.l', 'handslot.r']);
@@ -64,25 +78,31 @@ const CHARACTERS: Character[] = [
 		keep: [],
 		clips: { ...shared, Idle: 'Unarmed_Idle', Attack: 'Unarmed_Melee_Attack_Punch_A' }
 	},
-	// Monsters. The Skeletons pack ships its weapons separately, so these fight bare-handed.
+	// Monsters. The Skeletons pack ships its weapons as separate files, attached below.
 	{
 		// Tier 1 (and the training dummy): slow shamble.
 		src: 'Skeleton_Minion.glb',
 		out: 'skeleton_minion.glb',
 		keep: [],
-		clips: { ...skeleton, Idle: 'Idle', Run: 'Walking_D_Skeletons', Attack: 'Unarmed_Melee_Attack_Punch_A' }
+		attach: [{ file: 'Skeleton_Blade.gltf', ...RIGHT_HAND }],
+		clips: { ...skeleton, Idle: 'Idle', Run: 'Walking_D_Skeletons', Attack: '1H_Melee_Attack_Slice_Diagonal' }
 	},
 	{
 		src: 'Skeleton_Mage.glb',
 		out: 'skeleton_mage.glb',
 		keep: [],
-		clips: { ...skeleton, Idle: 'Idle_Combat', Run: 'Running_B', Attack: 'Spellcast_Shoot' }
+		attach: [{ file: 'Skeleton_Staff.gltf', ...RIGHT_HAND }],
+		clips: { ...skeleton, Idle: 'Idle', Run: 'Running_B', Attack: 'Spellcast_Shoot' }
 	},
 	{
 		src: 'Skeleton_Warrior.glb',
 		out: 'skeleton_warrior.glb',
 		keep: [],
-		clips: { ...skeleton, Idle: 'Idle_Combat', Run: 'Running_C', Attack: 'Unarmed_Melee_Attack_Kick' }
+		attach: [
+			{ file: 'Skeleton_Axe.gltf', ...RIGHT_HAND },
+			{ file: 'Skeleton_Shield_Large_A.gltf', ...LEFT_SHIELD }
+		],
+		clips: { ...skeleton, Idle: 'Idle_Combat', Run: 'Running_C', Attack: '1H_Melee_Attack_Chop' }
 	}
 ];
 
@@ -97,8 +117,12 @@ mkdirSync(outDir, { recursive: true });
 await MeshoptEncoder.ready;
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
 
+const find = (file: string) => srcDirs.map((d) => join(d, file)).find((f) => existsSync(f));
+
 for (const c of CHARACTERS) {
-	const src = srcDirs.map((d) => join(d, c.src)).find((f) => existsSync(f));
+	const src = find(c.src);
+	const missingProp = c.attach?.find((a) => !find(a.file));
+	if (missingProp) throw new Error(`${c.src}: prop ${missingProp.file} not found — pass the pack's Assets/gltf dir too`);
 	if (!src) {
 		console.log(`${c.out.padEnd(22)} skipped (${c.src} not found)`);
 		continue;
@@ -109,6 +133,21 @@ for (const c of CHARACTERS) {
 	for (const node of root.listNodes()) {
 		const slot = node.getParentNode()?.getName() ?? '';
 		if (node.getMesh() && PROP_SLOTS.has(slot) && !c.keep.includes(node.getName())) node.dispose();
+	}
+
+	for (const a of c.attach ?? []) {
+		const slot = root.listNodes().find((n) => n.getName() === a.slot);
+		if (!slot) throw new Error(`${c.src}: no ${a.slot} bone`);
+		const prop = await io.read(find(a.file)!);
+		const merged = mergeDocuments(doc, prop);
+		for (const scene of prop.getRoot().listScenes()) {
+			const copy = merged.get(scene) as Scene;
+			for (const n of copy.listChildren() as Node[]) {
+				copy.removeChild(n);
+				slot.addChild(n.setTranslation(a.translation).setRotation(a.rotation ?? [0, 0, 0, 1]));
+			}
+			copy.dispose();
+		}
 	}
 
 	const rename = new Map(Object.entries(c.clips).map(([to, from]) => [from, to]));
@@ -131,7 +170,8 @@ for (const c of CHARACTERS) {
 	if (missing.length) throw new Error(`${c.src}: missing clips ${missing.join(', ')}`);
 
 	// prune() keeps accessors that only the root lists, so orphans are dropped by hand around it.
-	await doc.transform(prune(), dedup(), resample(), prune());
+	// unpartition: attached props arrive with their own buffer; a .glb holds one.
+	await doc.transform(unpartition(), prune(), dedup(), resample(), prune());
 	dropOrphans();
 	await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
 	const out = join(outDir, c.out);
