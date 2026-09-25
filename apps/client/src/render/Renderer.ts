@@ -533,7 +533,8 @@ export class Renderer {
 			// Face where it walks, or whoever it's standing still to hit.
 			if (walking) v.heading = facingAngle(m.pos.x - was.x, m.pos.y - was.y);
 			else if (target) v.heading = facingAngle(target.pos.x - m.pos.x, target.pos.y - m.pos.y);
-			v.yaw += angleDelta(v.yaw, v.heading) * (1 - Math.exp(-TURN_RATE * dt));
+			// Stepping from the heading keeps yaw within one turn of it instead of accumulating.
+			v.yaw = v.heading - angleDelta(v.yaw, v.heading) * Math.exp(-TURN_RATE * dt);
 			const obj = v.model.object;
 			if (v.model.isFallback) {
 				// Floating, spinning gem.
