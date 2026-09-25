@@ -1,6 +1,6 @@
 import type * as THREE from 'three';
 
-export const ASSET_KEYS = ['fighter', 'monster1', 'monster2', 'monster3', 'arrow', 'fireball', 'pickup', 'rock', 'tree'] as const;
+export const ASSET_KEYS = ['fighter', 'monster1', 'monster2', 'monster3', 'arrow', 'fireball', 'pickup', 'rock', 'tree', 'deadTree'] as const;
 export type AssetKey = (typeof ASSET_KEYS)[number];
 
 /** Looping states. */
@@ -15,8 +15,10 @@ export type AnimName = LoopAnim | ShotAnim | 'death';
  * (a fighter is ~2 units tall).
  */
 export interface ModelSpec {
-	/** Served from `apps/client/public`, e.g. `models/fighter.glb`. */
+	/** Served from `apps/client/public`, e.g. `models/fighter.glb`. Shared URLs load once. */
 	url: string;
+	/** Use only this named node of the file — for packs of many props in one .glb. */
+	node?: string;
 	/** Uniformly scale so the bounding-box height equals this. Applied after `scale`. */
 	height?: number;
 	scale?: number;

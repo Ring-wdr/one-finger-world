@@ -19,7 +19,8 @@ const geo = {
 	pickup: lazy(() => new THREE.BoxGeometry(0.6, 0.6, 0.6)),
 	// Squashed and half-buried, as the old per-instance transform did.
 	rock: lazy(() => new THREE.DodecahedronGeometry(0.8, 0).scale(1, 0.7, 1).translate(0, 0.2, 0)),
-	tree: lazy(() => new THREE.ConeGeometry(0.9, 2.6, 7).translate(0, 1.3, 0))
+	tree: lazy(() => new THREE.ConeGeometry(0.9, 2.6, 7).translate(0, 1.3, 0)),
+	deadTree: lazy(() => new THREE.CylinderGeometry(0.06, 0.22, 2.4, 5).translate(0, 1.2, 0))
 };
 
 const mat = {
@@ -27,7 +28,8 @@ const mat = {
 	arrow: lazy(() => new THREE.MeshBasicMaterial({ color: 0xe8f1ff })),
 	fireball: lazy(() => new THREE.MeshBasicMaterial({ color: 0xff8a3d })),
 	rock: lazy(() => new THREE.MeshStandardMaterial({ color: 0x6d7580, roughness: 1, flatShading: true })),
-	tree: lazy(() => new THREE.MeshStandardMaterial({ color: 0x3f7a4a, roughness: 1, flatShading: true }))
+	tree: lazy(() => new THREE.MeshStandardMaterial({ color: 0x3f7a4a, roughness: 1, flatShading: true })),
+	deadTree: lazy(() => new THREE.MeshStandardMaterial({ color: 0x4a3b30, roughness: 1, flatShading: true }))
 };
 
 const MONSTER_COLOR = { monster1: 0x7bc96f, monster2: 0x9b6bd6, monster3: 0xd9534f } as const;
@@ -63,5 +65,6 @@ export const FALLBACKS: Record<AssetKey, (o: InstanceOptions) => FallbackBuild> 
 		return { object: wrap(box), glow: [], owned: [m] };
 	},
 	rock: () => shared(new THREE.Mesh(geo.rock(), mat.rock())),
-	tree: () => shared(new THREE.Mesh(geo.tree(), mat.tree()))
+	tree: () => shared(new THREE.Mesh(geo.tree(), mat.tree())),
+	deadTree: () => shared(new THREE.Mesh(geo.deadTree(), mat.deadTree()))
 };

@@ -13,7 +13,8 @@
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"test": "vitest --run",
 		"balance": "bun packages/sim/scripts/balance.ts",
-		"assets:characters": "bun apps/client/scripts/build-characters.ts"
+		"assets:characters": "bun apps/client/scripts/build-characters.ts",
+		"assets:props": "bun apps/client/scripts/build-props.ts"
 	},
 	"devDependencies": {
 		"@gltf-transform/core": "^4.5.0",
