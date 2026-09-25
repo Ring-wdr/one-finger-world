@@ -21,6 +21,7 @@ import {
 } from '@ofa/sim';
 import type { InputFeedbackEvent } from '../input/types';
 import type { Renderer } from '../render/Renderer';
+import { seenHints } from './hints';
 
 /** Menus, results and spectating are preact screens (./screens); the HUD is only the in-game layer. */
 export interface HudCallbacks {
@@ -45,24 +46,7 @@ const RARITY_LABEL = { common: '일반', rare: '희귀', legendary: '전설' } a
 const KIND_LABEL = { weapon: '무기', stat: '스탯', skill: '스킬', bridge: '브릿지' } as const;
 const ATTACK_LABEL = { melee: '근접 베기', ranged: '원거리 투사체' } as const;
 
-const HINTS_KEY = 'ofa.hints.v1';
 const HINT_SECONDS = 9;
-
-function loadSeenHints(): Set<string> {
-	try {
-		return new Set(JSON.parse(localStorage.getItem(HINTS_KEY) ?? '[]') as string[]);
-	} catch {
-		return new Set();
-	}
-}
-
-function saveSeenHints(seen: Set<string>) {
-	try {
-		localStorage.setItem(HINTS_KEY, JSON.stringify([...seen]));
-	} catch {
-		// Hints just repeat next time if storage is unavailable.
-	}
-}
 
 const h = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = '') => {
 	const el = document.createElement(tag);
@@ -108,7 +92,6 @@ export class Hud {
 	private buildKey = '';
 	private tagKey = '';
 	private minimapTimer = 0;
-	private seenHints = loadSeenHints();
 	private hintQueue: { id: string; text: string }[] = [];
 	private hintShowing: string | null = null;
 	private mode: HudMode = 'match';
@@ -211,17 +194,10 @@ export class Hud {
 
 	// ── Tutorial hints: each shows once (per browser), when it becomes relevant.
 
-	/** Settings → "show hints again". */
-	resetHints() {
-		this.seenHints.clear();
-		saveSeenHints(this.seenHints);
-	}
-
 	private hint(id: string, text: string) {
 		// The tutorial mode has its own step panel; one-off hints are for real matches.
-		if (this.mode !== 'match' || this.seenHints.has(id)) return;
-		this.seenHints.add(id);
-		saveSeenHints(this.seenHints);
+		if (this.mode !== 'match' || seenHints.has(id)) return;
+		seenHints.add(id);
 		this.hintQueue.push({ id, text });
 	}
 

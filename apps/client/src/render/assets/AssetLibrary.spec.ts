@@ -37,6 +37,23 @@ describe('AssetLibrary', () => {
 		warn.mockRestore();
 	});
 
+	it('reports progress per file (shared files once, failures included)', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const seen: [number, number][] = [];
+		const lib = new AssetLibrary(
+			{ fighter: { url: 'a.glb' }, monster1: { url: 'a.glb' }, rock: { url: 'bad.glb' } },
+			async (url) => {
+				if (url === 'bad.glb') throw new Error('404');
+				return fakeGltf();
+			}
+		);
+		await lib.preload((done, total) => seen.push([done, total]));
+		expect(seen[0]).toEqual([0, 2]);
+		expect(seen.at(-1)).toEqual([2, 2]);
+		expect(seen).toHaveLength(3);
+		warn.mockRestore();
+	});
+
 	it('grounds, centres and scales a loaded model to the requested height', async () => {
 		const lib = new AssetLibrary({ fighter: { url: 'f.glb', height: 2 } }, loader(fakeGltf));
 		await lib.preload();

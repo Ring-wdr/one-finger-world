@@ -1,11 +1,12 @@
 import { getRune, RUNE_SLOT_INFO, RUNE_SLOTS } from '@ofa/sim';
+import { sfx } from '../../app/sound';
 import { menuView, profile, type GameActions, type MenuView } from '../../app/store';
 import { Coins } from './common';
 
 export function MainMenu({ game }: { game: GameActions }) {
 	const p = profile.value;
 	const open = (v: MenuView) => {
-		game.click();
+		sfx.play('ui');
 		menuView.value = v;
 	};
 	return (

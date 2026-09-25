@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
-import { menuView, settings, type GameActions } from '../../app/store';
+import { sfx } from '../../app/sound';
+import { menuView, settings } from '../../app/store';
 import {
 	INPUT_THRESHOLD_PRESETS,
 	INPUT_THRESHOLD_RANGES,
@@ -7,6 +8,7 @@ import {
 	type InputThresholdPresetId
 } from '../../input/inputThresholdOptions';
 import { defaultSettings, type Settings } from '../../meta/settings';
+import { seenHints } from '../hints';
 import { Page } from './common';
 
 const PRESET_IDS = Object.keys(INPUT_THRESHOLD_PRESETS) as InputThresholdPresetId[];
@@ -26,7 +28,7 @@ function presetOf(o: InputThresholdOptions): InputThresholdPresetId | null {
 	);
 }
 
-export function SettingsScreen({ game }: { game: GameActions }) {
+export function SettingsScreen() {
 	const s = settings.value;
 	const [hintsReset, setHintsReset] = useState(false);
 	const patch = (p: Partial<Settings>) => (settings.value = { ...settings.value, ...p });
@@ -46,7 +48,7 @@ export function SettingsScreen({ game }: { game: GameActions }) {
 						value={Math.round(s.volume * 100)}
 						disabled={s.muted}
 						onInput={(e) => patch({ volume: Number(e.currentTarget.value) / 100 })}
-						onChange={() => game.click()}
+						onChange={() => sfx.play('ui')}
 					/>
 					<b>{s.muted ? '꺼짐' : `${Math.round(s.volume * 100)}`}</b>
 				</label>
@@ -68,7 +70,7 @@ export function SettingsScreen({ game }: { game: GameActions }) {
 							key={id}
 							class={`btn ${preset === id ? 'on' : ''}`}
 							onClick={() => {
-								game.click();
+								sfx.play('ui');
 								patch({ input: { ...INPUT_THRESHOLD_PRESETS[id].values } });
 							}}
 						>
@@ -110,7 +112,7 @@ export function SettingsScreen({ game }: { game: GameActions }) {
 						class="btn"
 						disabled={hintsReset}
 						onClick={() => {
-							game.resetHints();
+							seenHints.reset();
 							setHintsReset(true);
 						}}
 					>

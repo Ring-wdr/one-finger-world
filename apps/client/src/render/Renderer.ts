@@ -156,12 +156,16 @@ export class Renderer {
 	private readonly particles = new Particles(1024);
 	private readonly glowTex = glowTexture();
 
+	/** Resolves once every model has loaded or fallen back to its primitive. */
+	readonly ready: Promise<void>;
+
 	constructor(
 		canvas: HTMLCanvasElement,
+		onAssetProgress?: (done: number, total: number) => void,
 		private readonly assets = new AssetLibrary()
 	) {
 		// Primitives render immediately; models swap in as they arrive.
-		void this.assets.preload();
+		this.ready = this.assets.preload(onAssetProgress);
 
 		this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
