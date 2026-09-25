@@ -37,7 +37,9 @@ const loadGltf: LoadFn = async (url) => {
 	return loader.loadAsync(new URL(url, document.baseURI).href);
 };
 
-export function normalize(scene: THREE.Object3D, spec: ModelSpec): THREE.Object3D {
+export function normalize(source: THREE.Object3D, spec: ModelSpec): THREE.Object3D {
+	// The source keeps its own transform: on a quantized mesh node it is what dequantizes positions.
+	const scene = new THREE.Group().add(source);
 	scene.rotation.set(0, spec.rotationY ?? 0, 0);
 	scene.position.set(0, 0, 0);
 	scene.scale.setScalar(spec.scale ?? 1);
@@ -70,6 +72,23 @@ function pickClips(clips: THREE.AnimationClip[], wanted: ModelSpec['clips'] = {}
 	return out;
 }
 
+/**
+ * Quantized (meshopt) attributes are normalized integers in [-1, 1]; baking a transform into
+ * them would clamp. Widen the ones a transform touches to floats first.
+ */
+function toFloat(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+	for (const name of ['position', 'normal', 'tangent']) {
+		const attr = geometry.getAttribute(name);
+		if (!attr || attr.array instanceof Float32Array) continue;
+		const out = new Float32Array(attr.count * attr.itemSize);
+		for (let i = 0; i < attr.count; i++) {
+			for (let k = 0; k < attr.itemSize; k++) out[i * attr.itemSize + k] = attr.getComponent(i, k);
+		}
+		geometry.setAttribute(name, new THREE.BufferAttribute(out, attr.itemSize));
+	}
+	return geometry;
+}
+
 const materialsOf = (mesh: THREE.Mesh) => (Array.isArray(mesh.material) ? mesh.material : [mesh.material]);
 
 /**
@@ -79,7 +98,8 @@ const materialsOf = (mesh: THREE.Mesh) => (Array.isArray(mesh.material) ? mesh.m
 export class AssetLibrary {
 	/** Keyed by model id: the asset key, or `key:variant`. */
 	private readonly loaded = new Map<string, Loaded>();
-	private readonly parts = new Map<AssetKey, { tag: string; parts: InstancedPart[] }>();
+	/** Keyed by model id, like `loaded`. */
+	private readonly parts = new Map<string, { tag: string; parts: InstancedPart[] }>();
 	private disposed = false;
 
 	constructor(
@@ -95,12 +115,18 @@ export class AssetLibrary {
 			if ('variants' in entry) for (const [v, spec] of Object.entries(entry.variants)) models.push([`${key}:${v}`, spec]);
 			else models.push([key, entry]);
 		}
+		const files = new Map<string, Promise<GltfLike>>();
 		await Promise.all(
 			models.map(async ([id, spec]) => {
 				try {
-					const gltf = await this.load(spec.url);
+					if (!files.has(spec.url)) files.set(spec.url, this.load(spec.url));
+					const gltf = await files.get(spec.url)!;
 					if (this.disposed) return;
-					this.loaded.set(id, { spec, template: normalize(gltf.scene, spec), clips: pickClips(gltf.animations, spec.clips) });
+					const source = spec.node === undefined ? gltf.scene : gltf.scene.getObjectByName(spec.node);
+					if (!source) throw new Error(`no node "${spec.node}"`);
+					// Copied, since one file may feed several specs.
+					const scene = cloneSkinned(source);
+					this.loaded.set(id, { spec, template: normalize(scene, spec), clips: pickClips(gltf.animations, spec.clips) });
 				} catch (err) {
 					console.warn(`[assets] ${id}: failed to load ${spec.url}, keeping primitive`, err);
 				}
@@ -112,6 +138,12 @@ export class AssetLibrary {
 		const entry = this.manifest[key];
 		if (!entry || !('variants' in entry)) return key;
 		return `${key}:${variant !== undefined && variant in entry.variants ? variant : entry.default}`;
+	}
+
+	/** Variant names of a key, or none when it has a single look. */
+	variants(key: AssetKey): string[] {
+		const entry = this.manifest[key];
+		return entry && 'variants' in entry ? Object.keys(entry.variants) : [];
 	}
 
 	/**
@@ -153,18 +185,19 @@ export class AssetLibrary {
 	}
 
 	/** Geometry with node transforms baked in, one entry per mesh — for InstancedMesh props. */
-	instancedParts(key: AssetKey): InstancedPart[] {
-		const tag = this.tag(key);
-		const cached = this.parts.get(key);
+	instancedParts(key: AssetKey, variant?: string): InstancedPart[] {
+		const id = this.modelId(key, variant);
+		const tag = this.tag(key, variant);
+		const cached = this.parts.get(id);
 		if (cached?.tag === tag) return cached.parts;
-		const template = this.loaded.get(this.modelId(key))?.template ?? FALLBACKS[key]({}).object;
+		const template = this.loaded.get(id)?.template ?? FALLBACKS[key]({}).object;
 		template.updateMatrixWorld(true);
 		const parts: InstancedPart[] = [];
 		template.traverse((o) => {
-			if (o instanceof THREE.Mesh) parts.push({ geometry: o.geometry.clone().applyMatrix4(o.matrixWorld), material: o.material });
+			if (o instanceof THREE.Mesh) parts.push({ geometry: toFloat(o.geometry.clone()).applyMatrix4(o.matrixWorld), material: o.material });
 		});
 		cached?.parts.forEach((p) => p.geometry.dispose());
-		this.parts.set(key, { tag, parts });
+		this.parts.set(id, { tag, parts });
 		return parts;
 	}
 

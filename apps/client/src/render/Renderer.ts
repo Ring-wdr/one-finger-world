@@ -245,10 +245,15 @@ export class Renderer {
 
 	/**
 	 * Static props give the eye fixed landmarks, which reduces perceived motion.
-	 * Rebuilt (same seeded layout) when a rock or tree model arrives.
+	 * Rebuilt (same seeded layout) when a prop model arrives.
 	 */
 	private buildProps() {
-		const tag = `${this.assets.tag('rock')}|${this.assets.tag('tree')}`;
+		const keys = ['rock', 'tree', 'deadTree'] as const;
+		const variantsOf = (key: AssetKey) => {
+			const vs = this.assets.variants(key);
+			return vs.length ? vs : [undefined];
+		};
+		const tag = keys.map((k) => variantsOf(k).map((v) => this.assets.tag(k, v)).join(',')).join('|');
 		if (tag === this.propsTag) return;
 		this.propsTag = tag;
 		for (const p of this.props) {
@@ -257,32 +262,53 @@ export class Renderer {
 		}
 		this.props = [];
 
+		// Positions keep their original seed; looks (variant, yaw) draw from their own, so adding
+		// variants never moves anything.
 		const rng = new Rng(1234);
-		const place = (r: number, yaw: number, s: number) =>
-			new THREE.Matrix4().compose(
-				new THREE.Vector3(Math.cos(yaw) * r, 0, Math.sin(yaw) * r),
-				new THREE.Quaternion(),
-				new THREE.Vector3(s, s, s)
+		const look = new Rng(77);
+		const placed = new Map<AssetKey, Map<string | undefined, THREE.Matrix4[]>>();
+		const put = (key: AssetKey, r: number, angle: number, s: number, yaw: number) => {
+			const vs = variantsOf(key);
+			const v = vs[look.int(vs.length)];
+			const byVariant = placed.get(key) ?? new Map<string | undefined, THREE.Matrix4[]>();
+			placed.set(key, byVariant);
+			const list = byVariant.get(v) ?? [];
+			byVariant.set(v, list);
+			list.push(
+				new THREE.Matrix4().compose(
+					new THREE.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r),
+					new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
+					new THREE.Vector3(s, s, s)
+				)
 			);
-		const rocks: THREE.Matrix4[] = [];
+		};
 		for (let i = 0; i < 220; i++) {
 			const r = Math.sqrt(rng.next()) * MAP_RADIUS;
 			const a = rng.range(0, Math.PI * 2);
 			const s = rng.range(0.4, 1.4);
-			rocks.push(place(r, a, s).multiply(new THREE.Matrix4().makeRotationY(rng.range(0, 6))));
+			put('rock', r, a, s, rng.range(0, 6));
 		}
-		const trees: THREE.Matrix4[] = [];
 		for (let i = 0; i < 160; i++) {
 			const r = RING.mid + rng.next() * (MAP_RADIUS - RING.mid);
 			const a = rng.range(0, Math.PI * 2);
-			trees.push(place(r, a, rng.range(0.7, 1.3)));
+			put('tree', r, a, rng.range(0.7, 1.3), look.range(0, Math.PI * 2));
 		}
-		for (const [key, matrices] of [['rock', rocks], ['tree', trees]] as const) {
-			for (const part of this.assets.instancedParts(key)) {
-				const mesh = new THREE.InstancedMesh(part.geometry, part.material, matrices.length);
-				matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
-				this.props.push(mesh);
-				this.scene.add(mesh);
+		// Sparse dead trees in the middle ring: the land withers toward the centre.
+		const dead = new Rng(4321);
+		for (let i = 0; i < 45; i++) {
+			const r = RING.center + dead.next() * (RING.mid - RING.center);
+			const a = dead.range(0, Math.PI * 2);
+			put('deadTree', r, a, dead.range(0.8, 1.2), dead.range(0, Math.PI * 2));
+		}
+
+		for (const [key, byVariant] of placed) {
+			for (const [variant, matrices] of byVariant) {
+				for (const part of this.assets.instancedParts(key, variant)) {
+					const mesh = new THREE.InstancedMesh(part.geometry, part.material, matrices.length);
+					matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
+					this.props.push(mesh);
+					this.scene.add(mesh);
+				}
 			}
 		}
 	}

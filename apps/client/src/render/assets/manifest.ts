@@ -25,8 +25,17 @@ const character = (name: string, extra: Partial<ModelSpec> = {}): ModelSpec => (
  *       monster1: { url: 'models/slime.glb', height: 1.2, clips: { attack: 'Bite' } },
  *       rock: { url: 'models/rock.glb', height: 0.9 },
  *
- * Instanced props (rock, tree) should be a single static mesh; animations are ignored there.
+ * Instanced props (rock, tree, deadTree) should be static meshes; animations are ignored there,
+ * and each variant becomes its own InstancedMesh.
  */
+/** A node of the bundled props file. Pivots sit at the base; roots dipping below stay buried. */
+const prop = (node: string, extra: Partial<ModelSpec> = {}): ModelSpec => ({
+	url: 'models/props/nature.glb',
+	node,
+	anchor: 'origin',
+	...extra
+});
+
 export const MODEL_MANIFEST: AssetManifest = {
 	// KayKit Adventurers (CC0, Kay Lousberg), built by `bun run assets:characters`, which keeps
 	// one loadout and the Idle/Run/Attack/Hit/Dash clips per class. Picked by equipped weapon id.
@@ -44,5 +53,20 @@ export const MODEL_MANIFEST: AssetManifest = {
 	// straw through the shared `skeleton` material; real monsters keep their texture.
 	monster1: character('skeleton_minion', { scale: 0.7, tintMaterials: ['skeleton'] }),
 	monster2: character('skeleton_mage', { scale: 0.95, tintMaterials: ['skeleton'] }),
-	monster3: character('skeleton_warrior', { scale: 1.35, tintMaterials: ['skeleton'] })
+	monster3: character('skeleton_warrior', { scale: 1.35, tintMaterials: ['skeleton'] }),
+
+	// Map props from KayKit Medieval Hexagon and Halloween Bits (CC0), bundled into one file
+	// by `bun run assets:props`. Each placement picks one variant.
+	rock: {
+		default: 'a',
+		variants: Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((v) => [v, prop(`rock_${v}`, { scale: 5 })]))
+	},
+	tree: {
+		default: 'a',
+		variants: { a: prop('tree_a', { scale: 2.2 }), b: prop('tree_b', { scale: 2.2 }) }
+	},
+	deadTree: {
+		default: 'medium',
+		variants: Object.fromEntries(['small', 'medium', 'large'].map((v) => [v, prop(`dead_tree_${v}`, { scale: 0.7 })]))
+	}
 };

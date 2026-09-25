@@ -124,9 +124,9 @@ describe('AssetLibrary', () => {
 		expect(lib.tag('fighter', 'greatsword')).toBe('fighter:greatsword');
 		expect(lib.tag('fighter', 'fire_staff')).toBe('fighter:unarmed');
 		expect(lib.tag('fighter')).toBe('fighter:unarmed');
-		const sceneName = (o: THREE.Object3D) => o.children[0].name;
-		expect(sceneName(lib.instantiate('fighter', { variant: 'greatsword' }).object)).toBe('b.glb');
-		expect(sceneName(lib.instantiate('fighter', { variant: 'fire_staff' }).object)).toBe('a.glb');
+		const from = (o: THREE.Object3D) => ['a.glb', 'b.glb'].find((n) => o.getObjectByName(n));
+		expect(from(lib.instantiate('fighter', { variant: 'greatsword' }).object)).toBe('b.glb');
+		expect(from(lib.instantiate('fighter', { variant: 'fire_staff' }).object)).toBe('a.glb');
 	});
 
 	it('keeps the authored pivot with anchor: origin', async () => {
@@ -137,6 +137,55 @@ describe('AssetLibrary', () => {
 		const box = new THREE.Box3().setFromObject(inst.object);
 		expect(box.min.y).toBeCloseTo(1); // base at y = 2, halved
 		expect(box.min.x).toBeCloseTo(1.25);
+	});
+
+	it('loads a shared file once and picks named nodes as per-variant instanced props', async () => {
+		const bundle = (): GltfLike => {
+			const scene = new THREE.Group();
+			const mat = new THREE.MeshStandardMaterial();
+			const small = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat);
+			small.name = 'rock_a';
+			// Scaled on the node, as meshopt quantization does: normalising must keep it.
+			const tall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat);
+			tall.scale.set(1, 3, 1);
+			tall.name = 'rock_b';
+			scene.add(small, tall);
+			return { scene, animations: [] };
+		};
+		const load = vi.fn(async () => bundle());
+		const spec = (node: string) => ({ url: 'props.glb', node });
+		const lib = new AssetLibrary({ rock: { default: 'a', variants: { a: spec('rock_a'), b: { ...spec('rock_b'), scale: 2 } } } }, load);
+		expect(lib.variants('rock')).toEqual(['a', 'b']);
+		expect(lib.variants('tree')).toEqual([]);
+		await lib.preload();
+		expect(load).toHaveBeenCalledTimes(1);
+		const height = (variant: string) => {
+			const box = new THREE.Box3();
+			for (const p of lib.instancedParts('rock', variant)) {
+				p.geometry.computeBoundingBox();
+				box.union(p.geometry.boundingBox!);
+			}
+			return box.max.y - box.min.y;
+		};
+		expect(height('a')).toBeCloseTo(1);
+		expect(height('b')).toBeCloseTo(6);
+	});
+
+	it('bakes quantized prop geometry without clamping it', async () => {
+		// Like meshopt output: int16 normalized positions in [-1, 1], dequantized by the node's scale.
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.BufferAttribute(new Int16Array([0, -32767, 0, 0, 32767, 0, 32767, 0, 0]), 3, true));
+		const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
+		mesh.name = 'tree_a';
+		mesh.scale.setScalar(2);
+		mesh.position.y = 2; // spans y 0..4
+		const scene = new THREE.Group().add(mesh);
+		const lib = new AssetLibrary({ tree: { url: 't.glb', node: 'tree_a', anchor: 'origin' } }, async () => ({ scene, animations: [] }));
+		await lib.preload();
+		const [part] = lib.instancedParts('tree');
+		part.geometry.computeBoundingBox();
+		expect(part.geometry.boundingBox!.min.y).toBeCloseTo(0);
+		expect(part.geometry.boundingBox!.max.y).toBeCloseTo(4);
 	});
 
 	it('bakes node transforms into instanced prop geometry', async () => {
