@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import {
 	getItem,
+	MAP_PROPS,
 	MAP_RADIUS,
+	PROP_VARIANTS,
 	RING,
-	Rng,
 	TAG_INFO,
 	type Fighter,
 	type GameEvent,
@@ -261,7 +262,7 @@ export class Renderer {
 	 */
 	private buildProps() {
 		const keys = ['rock', 'tree', 'deadTree'] as const;
-		const variantsOf = (key: AssetKey) => {
+		const variantsOf = (key: AssetKey): (string | undefined)[] => {
 			const vs = this.assets.variants(key);
 			return vs.length ? vs : [undefined];
 		};
@@ -274,43 +275,25 @@ export class Renderer {
 		}
 		this.props = [];
 
-		// Positions keep their original seed; looks (variant, yaw) draw from their own, so adding
-		// variants never moves anything.
-		const rng = new Rng(1234);
-		const look = new Rng(77);
+		// Layout (position, scale, yaw, variant) comes from the sim, which also collides with the
+		// same props, so what blocks a unit is exactly what is drawn.
 		const placed = new Map<AssetKey, Map<string | undefined, THREE.Matrix4[]>>();
-		const put = (key: AssetKey, r: number, angle: number, s: number, yaw: number) => {
-			const vs = variantsOf(key);
-			const v = vs[look.int(vs.length)];
-			const byVariant = placed.get(key) ?? new Map<string | undefined, THREE.Matrix4[]>();
-			placed.set(key, byVariant);
+		const up = new THREE.Vector3(0, 1, 0);
+		for (const p of MAP_PROPS) {
+			const vs = variantsOf(p.kind);
+			const name = PROP_VARIANTS[p.kind][p.variant]?.name;
+			const v = name !== undefined && vs.includes(name) ? name : vs[p.variant % vs.length];
+			const byVariant = placed.get(p.kind) ?? new Map<string | undefined, THREE.Matrix4[]>();
+			placed.set(p.kind, byVariant);
 			const list = byVariant.get(v) ?? [];
 			byVariant.set(v, list);
 			list.push(
 				new THREE.Matrix4().compose(
-					new THREE.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r),
-					new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw),
-					new THREE.Vector3(s, s, s)
+					toThree(p),
+					new THREE.Quaternion().setFromAxisAngle(up, p.yaw),
+					new THREE.Vector3(p.scale, p.scale, p.scale)
 				)
 			);
-		};
-		for (let i = 0; i < 220; i++) {
-			const r = Math.sqrt(rng.next()) * MAP_RADIUS;
-			const a = rng.range(0, Math.PI * 2);
-			const s = rng.range(0.4, 1.4);
-			put('rock', r, a, s, rng.range(0, 6));
-		}
-		for (let i = 0; i < 160; i++) {
-			const r = RING.mid + rng.next() * (MAP_RADIUS - RING.mid);
-			const a = rng.range(0, Math.PI * 2);
-			put('tree', r, a, rng.range(0.7, 1.3), look.range(0, Math.PI * 2));
-		}
-		// Sparse dead trees in the middle ring: the land withers toward the centre.
-		const dead = new Rng(4321);
-		for (let i = 0; i < 45; i++) {
-			const r = RING.center + dead.next() * (RING.mid - RING.center);
-			const a = dead.range(0, Math.PI * 2);
-			put('deadTree', r, a, dead.range(0.8, 1.2), dead.range(0, Math.PI * 2));
 		}
 
 		for (const [key, byVariant] of placed) {

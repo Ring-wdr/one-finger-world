@@ -16,6 +16,8 @@ import {
 import { isOfferable, phaseAt, rollOffer } from './draft';
 import { getItem, WEAPON_IDS } from './items';
 import { spawnMonsters, updateMonster } from './monsters';
+import { newNav } from './nav';
+import { clearSpot, moveWithCollision, resolveObstacles } from './obstacles';
 import { Rng } from './rng';
 import { newStatus } from './status';
 import { TAGS } from './tags';
@@ -26,7 +28,7 @@ import {
 	type Fighter,
 	type World
 } from './types';
-import { add, clampToCircle, copy, dist, fromAngle, normalize, scale } from './vec';
+import { clampToCircle, copy, dist, fromAngle, normalize, scale } from './vec';
 import { createZone, isInside, updateZone } from './zone';
 
 const BOT_NAMES = [
@@ -112,9 +114,11 @@ export interface SpawnFighterOptions {
 export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
 	const build = summarizeBuild([]);
 	const rng = world.rng;
+	const id = world.nextId++;
+	const pos = clearSpot(o.pos, 0.7 + 0.1);
 	const f: Fighter = {
 		kind: 'fighter',
-		id: world.nextId++,
+		id,
 		name: o.name,
 		color: o.color,
 		bot: o.bot
@@ -124,17 +128,19 @@ export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
 					thinkTimer: rng.next() * 0.3,
 					targetId: null,
 					goal: null,
+					goalTimer: 0,
 					mode: 'roam',
 					aggressive: o.aggressive ?? false
 				}
 			: null,
-		pos: copy(o.pos),
+		nav: newNav(id, pos),
+		pos,
 		radius: 0.7,
 		hp: build.stats.maxHp,
 		maxHp: build.stats.maxHp,
 		alive: true,
 		status: newStatus(),
-		facing: normalize({ x: -o.pos.x, y: -o.pos.y }),
+		facing: normalize({ x: -pos.x, y: -pos.y }),
 		moveDir: null,
 		running: false,
 		level: 1,
@@ -239,7 +245,8 @@ function updateFighter(world: World, f: Fighter) {
 	} else {
 		if (f.moveDir && f.rootTime <= 0) {
 			const speed = s.moveSpeed * (f.running ? 1 : 0.55);
-			f.pos = add(f.pos, scale(f.moveDir, speed * DT));
+			// Everyone (the player too) slides along obstacles; only AI steers around them.
+			f.pos = moveWithCollision(f.pos, scale(f.moveDir, speed * DT), f.radius);
 			f.facing = copy(f.moveDir);
 		}
 		if (f.attackQueued > 0 && f.attackCd <= 0) performAttack(world, f);
@@ -304,6 +311,8 @@ export function step(world: World, commands?: ReadonlyMap<number, readonly Comma
 	for (const m of world.monsters) if (m.alive) updateMonster(world, m);
 
 	updateProjectiles(world);
+	// Knockback (from melee or projectiles) can shove a monster into a rock.
+	for (const m of world.monsters) if (m.alive) m.pos = resolveObstacles(m.pos, m.radius);
 	for (const f of world.fighters) if (f.alive) tickStatuses(world, f);
 	for (const m of world.monsters) if (m.alive) tickStatuses(world, m);
 

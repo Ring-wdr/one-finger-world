@@ -2,6 +2,8 @@ import { usesRangedBasic } from './build';
 import { unitById } from './combat';
 import { isOfferable } from './draft';
 import { getItem, WEAPON_IDS } from './items';
+import { navigate } from './nav';
+import { clearSpot } from './obstacles';
 import { SYNERGY_THRESHOLDS } from './tags';
 import type { Circle } from './zone';
 import { DT, RING, MAP_RADIUS, type Command, type Fighter, type Unit, type World } from './types';
@@ -59,10 +61,21 @@ function preferredBand(f: Fighter): [number, number] {
 	return [RING.mid, MAP_RADIUS - 4];
 }
 
+/** A roam goal is given up on after this long, reached or not. */
+const ROAM_TIMEOUT = 10;
+/** ...or after this many consecutive stuck windows (0.5 s each) on the way. */
+const ROAM_GIVE_UP_STUCK = 4;
+
+/**
+ * Re-evaluates the bot's mode. Goals are recomputed from the situation, except a roam goal,
+ * which is kept until reached, blocked or timed out so roaming bots walk somewhere instead
+ * of zig-zagging between fresh random points.
+ */
 function think(world: World, f: Fighter) {
 	const b = f.bot!;
 	const zone = world.zone;
 	const safe = zone.shrinking || zone.timer < 12 ? zone.to : zone.current;
+	const keptRoam = b.mode === 'roam' ? b.goal : null;
 
 	b.targetId = null;
 	b.goal = null;
@@ -79,9 +92,11 @@ function think(world: World, f: Fighter) {
 		}
 	}
 
-	if (dist(f.pos, safe.center) > Math.max(2, safe.radius - 3)) {
+	// The zone centre may sit in a rock: head for the nearest free spot instead.
+	const safeCenter = clearSpot(safe.center, f.radius + 0.2);
+	if (dist(f.pos, safeCenter) > Math.max(2, safe.radius - 3)) {
 		b.mode = 'zone';
-		b.goal = copyVec(safe.center);
+		b.goal = safeCenter;
 		return;
 	}
 
@@ -162,8 +177,13 @@ function think(world: World, f: Fighter) {
 	}
 
 	b.mode = 'roam';
+	if (keptRoam && b.goalTimer > 0 && dist(keptRoam, safe.center) <= safe.radius * 0.8 + 1e-6) {
+		b.goal = keptRoam;
+		return;
+	}
 	const p = fromAngle(world.rng.range(0, Math.PI * 2), world.rng.range(bandIn, bandOut));
-	b.goal = clampToCircle(p, safe.center, safe.radius * 0.8);
+	b.goal = clearSpot(clampToCircle(p, safe.center, safe.radius * 0.8), f.radius + 0.2);
+	b.goalTimer = ROAM_TIMEOUT;
 }
 
 /** Run away, but bend toward the bot's own (safer) ring instead of into the dangerous center. */
@@ -174,11 +194,17 @@ function fleeGoal(f: Fighter, from: Vec2, safe: Circle): Vec2 {
 	const radial = normalize(f.pos);
 	const bias = r < bandIn ? scale(radial, 0.8) : r > bandOut ? scale(radial, -0.8) : { x: 0, y: 0 };
 	const goal = add(f.pos, scale(normalize(add(away, bias)), 12));
-	return clampToCircle(goal, safe.center, safe.radius * 0.9);
+	return clearSpot(clampToCircle(goal, safe.center, safe.radius * 0.9), f.radius + 0.2);
 }
 
 function copyVec(v: Vec2): Vec2 {
 	return { x: v.x, y: v.y };
+}
+
+/** Steered direction toward `goal` (null when there): obstacle-aware, with stuck detours. */
+function steerTo(world: World, f: Fighter, goal: Vec2): Vec2 | null {
+	const speed = f.rootTime > 0 || f.dashTime > 0 ? 0 : f.build.stats.moveSpeed;
+	return navigate(f.nav, f.pos, f.radius, goal, speed, world.tick);
 }
 
 /** Bots speak the same Command language as humans, so the server never special-cases them. */
@@ -190,6 +216,7 @@ export function botCommands(world: World, f: Fighter): Command[] {
 	if (draft) cmds.push(draft);
 
 	b.thinkTimer -= DT;
+	b.goalTimer -= DT;
 	const target = unitById(world, b.targetId);
 	if (b.thinkTimer <= 0 || (b.targetId !== null && !target?.alive)) {
 		b.thinkTimer = 0.3 + world.rng.next() * 0.1;
@@ -206,7 +233,8 @@ export function botCommands(world: World, f: Fighter): Command[] {
 			if (f.attackCd <= 0) cmds.push({ type: 'attack' });
 		} else {
 			const dir = normalize(sub(t.pos, f.pos));
-			cmds.push({ type: 'move', dir, run: true });
+			cmds.push({ type: 'move', dir: steerTo(world, f, t.pos) ?? dir, run: true });
+			// Dashes go straight (they slide along obstacles but don't steer).
 			if (b.mode === 'fight' && d > 4 && d < 8 && f.dashCd <= 0 && world.rng.chance(0.03)) {
 				cmds.push({ type: 'dash', dir });
 			}
@@ -214,13 +242,18 @@ export function botCommands(world: World, f: Fighter): Command[] {
 		return cmds;
 	}
 
+	if (b.goal && b.mode === 'roam' && f.nav.stuckCount >= ROAM_GIVE_UP_STUCK) {
+		// Blocked for good: drop it and roll a new one at the next think.
+		b.goal = null;
+		f.nav.stuckCount = 0;
+	}
 	if (b.goal) {
 		if (dist(b.goal, f.pos) < 1.5) {
 			b.goal = null;
 			cmds.push({ type: 'move', dir: null, run: true });
 		} else {
 			const dir = normalize(sub(b.goal, f.pos));
-			cmds.push({ type: 'move', dir, run: true });
+			cmds.push({ type: 'move', dir: steerTo(world, f, b.goal) ?? dir, run: true });
 			if (b.mode === 'flee' && f.dashCd <= 0) cmds.push({ type: 'dash', dir });
 		}
 		return cmds;

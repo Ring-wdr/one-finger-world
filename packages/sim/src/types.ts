@@ -3,6 +3,7 @@ import type { MatchPhase } from './draft';
 import type { SkillId } from './items';
 import type { Rng } from './rng';
 import type { Tag, SynergyTier } from './tags';
+import type { NavState } from './nav';
 import type { Vec2 } from './vec';
 import type { ZoneState } from './zone';
 
@@ -54,6 +55,8 @@ export interface BotBrain {
 	thinkTimer: number;
 	targetId: number | null;
 	goal: Vec2 | null;
+	/** Seconds a roam goal is kept before it is given up on. */
+	goalTimer: number;
 	mode: 'farm' | 'fight' | 'flee' | 'zone' | 'loot' | 'roam' | 'rest';
 	/** Always engages the nearest fighter (tutorial sparring partner). */
 	aggressive: boolean;
@@ -64,6 +67,8 @@ export interface Fighter extends UnitBase {
 	name: string;
 	color: string;
 	bot: BotBrain | null;
+	/** Obstacle steering / stuck-detection state (used by bots). */
+	nav: NavState;
 	facing: Vec2;
 	moveDir: Vec2 | null;
 	running: boolean;
@@ -113,6 +118,8 @@ export interface Monster extends UnitBase {
 	 * returning it ignores aggro and hits, walks home and regenerates.
 	 */
 	returning: boolean;
+	/** Obstacle steering / stuck-detection state. */
+	nav: NavState;
 	/** Training dummy: never moves, attacks or heals. */
 	passive: boolean;
 }

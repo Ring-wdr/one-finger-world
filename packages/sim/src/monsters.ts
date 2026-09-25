@@ -13,6 +13,8 @@ import {
 } from './types';
 import { add, copy, dist, fromAngle, normalize, scale, sub, type Vec2 } from './vec';
 import { newStatus } from './status';
+import { navigate, newNav } from './nav';
+import { clearSpot, isClear, moveWithCollision } from './obstacles';
 import { usesRangedBasic } from './build';
 
 interface TierDef {
@@ -62,6 +64,8 @@ const WANDER_TIMEOUT = 8;
 /** Matches the melee combo finisher's reach multiplier in combat.ts. */
 const MELEE_FINISHER_REACH = 1.15;
 const MAX_EXTRA_REACH = 3;
+/** Free ground a monster home needs around it (largest monster radius + slack). */
+const SPAWN_CLEARANCE = 1.7;
 
 export function spawnMonsters(world: World, force = false) {
 	world.spawnTimer -= DT;
@@ -89,6 +93,7 @@ function findSpawnPoint(world: World, ring: RingId): Vec2 | null {
 		const p = fromAngle(world.rng.range(0, Math.PI * 2), r);
 		if (!isInside(world.zone, p)) continue;
 		if (world.fighters.some((f) => f.alive && dist(f.pos, p) < 14)) continue;
+		if (!isClear(p, SPAWN_CLEARANCE)) continue;
 		return p;
 	}
 	return null;
@@ -110,13 +115,16 @@ export function spawnMonster(
 	const hpScale = 1 + world.time / 200;
 	const hp = opts.hp ?? def.hp * hpScale;
 	const dmgScale = 1 + world.time / 300;
+	const id = world.nextId++;
+	// Scripted spawns (tutorial) may ask for a spot inside a rock: take the nearest free one.
+	const at = clearSpot(pos, def.radius + 0.1);
 	const m: Monster = {
 		kind: 'monster',
-		id: world.nextId++,
+		id,
 		tier,
-		pos: copy(pos),
-		home: copy(pos),
-		wander: copy(pos),
+		pos: copy(at),
+		home: copy(at),
+		wander: copy(at),
 		wanderTimer: 0,
 		returning: false,
 		radius: def.radius,
@@ -129,6 +137,7 @@ export function spawnMonster(
 		damage: def.damage * dmgScale,
 		speed: def.speed,
 		xp: opts.xp ?? def.xp,
+		nav: newNav(id, at),
 		passive: opts.passive ?? false
 	};
 	world.monsters.push(m);
@@ -136,11 +145,13 @@ export function spawnMonster(
 	return m;
 }
 
-function moveToward(m: Monster, goal: Vec2, speed: number) {
-	const d = sub(goal, m.pos);
-	const l = Math.hypot(d.x, d.y);
+/** Steers around obstacles (detouring when stuck) and slides along any it touches. */
+function moveToward(world: World, m: Monster, goal: Vec2, speed: number) {
+	const l = dist(goal, m.pos);
 	if (l < 1e-6) return;
-	m.pos = add(m.pos, scale(d, Math.min(l, speed * DT) / l));
+	const dir = navigate(m.nav, m.pos, m.radius, goal, speed, world.tick);
+	if (!dir) return;
+	m.pos = moveWithCollision(m.pos, scale(dir, Math.min(l, speed * DT)), m.radius);
 }
 
 export function updateMonster(world: World, m: Monster) {
@@ -157,7 +168,7 @@ export function updateMonster(world: World, m: Monster) {
 			m.wander = copy(m.pos);
 			m.wanderTimer = 0;
 		} else {
-			moveToward(m, m.home, m.speed);
+			moveToward(world, m, m.home, m.speed);
 		}
 		return;
 	}
@@ -188,7 +199,7 @@ export function updateMonster(world: World, m: Monster) {
 		// reach so a fighter that can hit the monster can always be hit back.
 		const reach = attackReach(m, target);
 		const d = dist(m.pos, target.pos);
-		if (d > m.radius + target.radius + 0.5) moveToward(m, target.pos, m.speed);
+		if (d > m.radius + target.radius + 0.5) moveToward(world, m, target.pos, m.speed);
 		if (d <= reach && m.attackCd <= 0) {
 			m.attackCd = ATTACK_COOLDOWN;
 			world.events.push({
@@ -213,10 +224,18 @@ export function updateMonster(world: World, m: Monster) {
 	}
 	m.wanderTimer -= DT;
 	if (m.wanderTimer <= 0 || (dist(m.pos, m.wander) < 0.3 && world.rng.chance(0.02))) {
-		m.wander = add(m.home, fromAngle(world.rng.range(0, Math.PI * 2), world.rng.range(0, WANDER_RADIUS)));
+		m.wander = copy(m.home);
+		// Never wander into a rock; a few rerolls, else idle at home.
+		for (let attempt = 0; attempt < 4; attempt++) {
+			const w = add(m.home, fromAngle(world.rng.range(0, Math.PI * 2), world.rng.range(0, WANDER_RADIUS)));
+			if (isClear(w, m.radius + 0.1)) {
+				m.wander = w;
+				break;
+			}
+		}
 		m.wanderTimer = WANDER_TIMEOUT;
 	}
-	moveToward(m, m.wander, m.speed * 0.3);
+	moveToward(world, m, m.wander, m.speed * 0.3);
 }
 
 function startReturn(m: Monster) {

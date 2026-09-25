@@ -7,6 +7,21 @@ export * from './items';
 export * from './build';
 export * from './draft';
 export * from './zone';
+export {
+	MAP_PROPS,
+	OBSTACLES,
+	PROP_VARIANTS,
+	clearSpot,
+	isClear,
+	moveWithCollision,
+	overlappingObstacle,
+	resolveObstacles,
+	forEachObstacleNear,
+	type MapProp,
+	type Obstacle,
+	type PropKind
+} from './obstacles';
+export { type NavState } from './nav';
 export { xpToNext, gainXp, DASH_TIME, DASH_DISTANCE, COMBO_WINDOW } from './combat';
 export { MONSTER_TIERS, spawnMonster, type SpawnMonsterOptions } from './monsters';
 export { powerScore } from './bot';

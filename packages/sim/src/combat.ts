@@ -1,6 +1,7 @@
 import { summarizeBuild, usesRangedBasic } from './build';
 import { rollOffer } from './draft';
 import { getItem, SKILLS, type SkillId } from './items';
+import { moveWithCollision } from './obstacles';
 import { TAGS } from './tags';
 import {
 	DT,
@@ -274,7 +275,8 @@ export function startDash(world: World, f: Fighter, dir: Vec2) {
 }
 
 export function updateDash(world: World, f: Fighter) {
-	f.pos = add(f.pos, scale(f.dashDir, (DASH_DISTANCE / DASH_TIME) * DT));
+	// Dashes slide along obstacles but never steer around them.
+	f.pos = moveWithCollision(f.pos, scale(f.dashDir, (DASH_DISTANCE / DASH_TIME) * DT), f.radius);
 	if (f.build.skills.includes('flashStep')) {
 		for (const e of enemiesOf(world, f)) {
 			if (f.dashHit.includes(e.id) || dist(e.pos, f.pos) > 1.8 + e.radius) continue;
