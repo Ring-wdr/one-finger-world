@@ -131,6 +131,8 @@ export interface Projectile {
 	owner: number;
 	kind: 'arrow' | 'fireball';
 	pos: Vec2;
+	/** Start of the next tick's swept hit test (the shooter's position on the first tick). */
+	sweepFrom: Vec2;
 	vel: Vec2;
 	life: number;
 	radius: number;

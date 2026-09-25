@@ -251,6 +251,8 @@ function updateFighter(world: World, f: Fighter) {
 		}
 		if (f.attackQueued > 0 && f.attackCd <= 0) performAttack(world, f);
 	}
+	// Guard reflect can kill the attacker mid-update (in a dash hit or a basic attack).
+	if (!f.alive) return;
 	f.pos = clampToCircle(f.pos, { x: 0, y: 0 }, MAP_RADIUS);
 	castSkills(world, f);
 }
