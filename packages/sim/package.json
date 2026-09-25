@@ -1,0 +1,10 @@
+{
+	"name": "@ofa/sim",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Deterministic, renderer-free match simulation shared by client and (future) server.",
+	"exports": {
+		".": "./src/index.ts"
+	}
+}

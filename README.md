@@ -1,42 +1,80 @@
-# sv
+# One Finger Royale
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+한 손가락으로 하는 3D 실시간 육성 배틀로얄. 현재 단계는 **싱글플레이 빌드 시스템 프로토타입**입니다 (플레이어 1명 + 봇 11명).
+3D 멀미를 고려해 **고정 각도 쿼터뷰**를 씁니다. 카메라는 감쇠 이동만 하고 회전, 흔들림, 헤드밥은 없습니다.
 
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
+```bash
+bun install
+bun run dev        # http://localhost:5173 (--host: 같은 와이파이의 폰에서 접속 가능)
+bun run test       # sim 규칙 + 입력 컨트롤러 테스트
+bun run typecheck
+bun run balance -- 60 12   # 봇끼리 60판 헤드리스 시뮬레이션 → 태그·리스크 성향별 승률
 ```
 
-To recreate this project with the same configuration:
+## 모드
 
-```sh
-# recreate this project
-bun x sv@0.15.2 create --template minimal --types ts --add eslint vitest="usages:unit,component" sveltekit-adapter="adapter:static" mcp="ide:other+setup:remote" tailwindcss="plugins:none" --install bun one-finger-act
+- **튜토리얼**: 본 게임과 분리된 샌드박스입니다 (몬스터 자동 스폰·자기장·페이즈·승패 없음). 13단계를 차례로 진행합니다: 이동 → 달리기 → 무기 선택 → 공격 → 3연타 → 대시 → 사냥 → 레벨업·시너지 → 무기 교체 → 자기장 → 1:1 대결(원거리 봇) → 전리품 → 빌드 확인. 목표 지점은 빛기둥으로 표시되고, 쓰러지지 않으며, 단계마다 건너뛸 수 있습니다.
+- **본 게임**: 플레이어 1명 + 봇 11명 배틀로얄.
+
+## 조작 (한 손)
+
+| 입력 | 동작 |
+| --- | --- |
+| 시작 시 무기 선택 | 대검·쌍단검 = 근접 / 사냥활·화염 지팡이 = 원거리 기본 공격 |
+| 탭 | 공격 (가까운 적 자동 조준, 3연타 콤보) |
+| 드래그 | 이동. 멀리 또는 오래 끌면 달리기 |
+| 빠른 스와이프 2회 | 대시 (무적 프레임) |
+| 레벨업 버튼 | 3장 드래프트 (리롤 제한) |
+| 빌드 버튼 | 시너지/스탯 확인, 교환권으로 아이템 교환 |
+
+키보드(개발용): WASD 이동, Space 공격, Shift 대시, E 드래프트, 1/2/3 선택, R 리롤, B 빌드
+
+## 구조
+
+```
+packages/sim     결정론적 게임 로직 (렌더러·DOM 의존 없음) — 클라/미래 서버 공용
+  types.ts       World/Fighter/Monster/Command/GameEvent, 틱레이트(20Hz)
+  tags.ts        태그 6종 + 시너지 임계점(3, 5)
+  stats.ts       스탯, 소프트캡(무릎 이후 로그 체감), 아이템 예산 가중치
+  items.ts       아이템/스킬/브릿지(전설) 정의
+  build.ts       아이템 목록 → 태그 개수·시너지 티어·최종 스탯
+  draft.ts       페이즈별 드래프트 풀 (스탯 → 스킬 → 시너지)
+  zone.ts        자기장 단계 (PvE 링과 독립)
+  combat.ts      피해/상태이상/공격/스킬/투사체/처치 드롭
+  monsters.ts    링별 몬스터 스폰·AI
+  bot.ts         봇 AI (사람과 같은 Command만 사용)
+  world.ts       createWorld / step(world, commands)
+  scripts/balance.ts  헤드리스 밸런스 러너
+apps/client      Vite + Three.js 클라이언트
+  input/         InputController (기존 조작법 유지) + 키보드 폴백
+  render/        Renderer (고정 카메라, 틱 보간, 이펙트)
+  ui/            HUD (드래프트 카드, 태그 바, 미니맵, 킬피드)
+  tutorial/      튜토리얼 디렉터 (DOM 없는 순수 로직, 오토파일럿 테스트로 완주 검증)
+  game/          모드 전환(메뉴/본 게임/튜토리얼) + 고정 틱 루프 (20Hz sim, rAF 렌더 보간)
 ```
 
-## Developing
+## 설계 요약
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+**빌드**
+- **무기 = 가벼운 직업**: 시작할 때 무기 4종 중 하나를 골라 기본 공격(근접/원거리)을 정합니다. 1·2페이즈 드래프트에 가끔 무기 카드가 나오고, 고르면 지금 무기와 교체됩니다 (다른 아이템은 유지). 무기는 처치 드롭·교환 대상이 아닙니다.
+- **튜토리얼 힌트**: 상황별로 한 번씩 나옵니다 (무기 선택, 조작, 첫 레벨업, 원거리 피격, 무기 교체 카드, 2·3페이즈, 자기장, 첫 시너지). 시작 화면에서 다시 볼 수 있게 초기화할 수 있습니다.
+- 모든 아이템에 태그를 붙입니다. 같은 태그가 **3개/5개** 모이면 메커니즘이 켜집니다 (화상, 출혈 중첩, 360° 베기, 관통 화살, 보호막/반사, 대시 강화).
+- **트레이드오프는 테스트로 강제합니다**: 희귀·전설, 그리고 예산이 1.3을 넘는 일반 아이템은 반드시 마이너스 스탯을 가집니다 (`sim.spec.ts`).
+- **소프트캡**: 스탯마다 무릎(knee)까지는 선형이고 이후에는 로그로 체감합니다. 한 축만 쌓기보다 다른 축으로 넓히는 편이 DPS가 높습니다 (테스트로 보장).
+- **희귀도 = 시너지 폭**: 일반은 태그 1개, 희귀는 2개입니다. 전설은 **브릿지**로, 한 태그 개수의 절반을 다른 태그로도 세고 스탯 하나를 다른 스탯으로 전환합니다. 전설의 순 스탯 예산은 오히려 낮습니다.
+- **드래프트**: 레벨업마다 3장이 나오고, 보유 태그 쪽으로 약하게 치우칩니다. 리롤은 시작 2회에 페이즈마다 +1회입니다. 스킬 슬롯은 3개입니다.
+- **되돌리기는 최소한만**: 교환권은 2·3페이즈 시작 시 1장씩입니다. 아이템 1개를 버리면 즉시 드래프트 1회를 받습니다.
 
-```sh
-npm run dev
+**맵/페이즈**
+- PvE 링: 외곽(약한 몬스터, 안전) / 중간 / 중앙(강한 몬스터, 경험치 높음). 자기장은 링과 별개로, 무작위 중심을 향해 줄어듭니다.
+- 페이즈별 드래프트 자원: 0–75초 스탯, 75–165초 스킬, 165초 이후 브릿지(시너지 완성). 자기장 4단계부터는 몬스터가 다시 생기지 않아 후반은 PvP 위주입니다.
+- 처치하면 상대 빌드에서 **무작위 아이템 1개만** 떨어집니다.
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+**넷코드 대비**
+- `step(world, commands)`는 시드와 입력이 같으면 결과가 항상 같습니다 (테스트로 보장). 봇도 사람과 똑같은 `Command`를 냅니다.
+- 멀티로 넘어갈 때는 `packages/sim`을 서버(Colyseus 등)가 권위적으로 돌리고, 클라는 같은 패키지로 예측과 보간을 합니다.
 
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## 다음 단계
+1. `bun run balance`로 태그별 승률 편차 줄이기 (현재 수호·화염이 강세)
+2. 실제 폰에서 한 손 플레이 테스트: 드래프트 시트, 버튼 위치, 대시 제스처 오인식
+3. 멀티: 서버 권위 룸 + 스냅샷 델타 + 클라 예측
