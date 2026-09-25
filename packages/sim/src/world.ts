@@ -220,6 +220,18 @@ export function equip(world: World, f: Fighter, id: string) {
 	if (getItem(id).kind === 'weapon') f.items = f.items.filter((x) => getItem(x).kind !== 'weapon');
 	f.items.push(id);
 	applyBuild(world, f);
+	revalidateOffer(world, f);
+}
+
+/**
+ * Items gained outside the draft (pickups, scripted equips) can make an open offer's entries
+ * un-draftable (owned skill/bridge/weapon, skill cap). Replace just those, free of rerolls.
+ */
+export function revalidateOffer(world: World, f: Fighter) {
+	if (!f.offer) return;
+	const valid = f.offer.filter((id) => isOfferable(getItem(id), f.items));
+	if (valid.length === f.offer.length) return;
+	f.offer = rollOffer(world.rng, world.phase, f.items, valid);
 }
 
 function updateFighter(world: World, f: Fighter) {
@@ -277,8 +289,8 @@ function onPhaseChange(world: World) {
 		if (!f.alive) continue;
 		f.rerolls += 1;
 		f.exchangeTokens += 1;
-		// Banked drafts re-roll into the new phase's resource type.
-		if (f.offer) f.offer = rollOffer(world.rng, world.phase, f.items);
+		// Banked drafts re-roll into the new phase's resource type (not the opening weapon pick).
+		if (f.offer && f.build.weapon) f.offer = rollOffer(world.rng, world.phase, f.items);
 	}
 }
 

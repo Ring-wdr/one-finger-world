@@ -40,16 +40,20 @@ export function scoreItem(f: Fighter, itemId: string) {
 
 function draftCommand(world: World, f: Fighter): Command | null {
 	if (!f.offer) return null;
-	let best = 0;
+	let best = -1;
 	let bestScore = -Infinity;
 	f.offer.forEach((id, i) => {
+		// The sim rejects drafts it can't apply; never burn the pick on one.
+		if (!isOfferable(getItem(id), f.items)) return;
 		const s = scoreItem(f, id);
 		if (s > bestScore) {
 			bestScore = s;
 			best = i;
 		}
 	});
-	if (bestScore < 3 && f.rerolls > 0 && f.build.weapon && world.rng.chance(0.5)) return { type: 'reroll' };
+	const canReroll = f.rerolls > 0 && f.build.weapon;
+	if (best < 0) return canReroll ? { type: 'reroll' } : null;
+	if (bestScore < 3 && canReroll && world.rng.chance(0.5)) return { type: 'reroll' };
 	return { type: 'draft', index: best };
 }
 
@@ -65,6 +69,27 @@ function preferredBand(f: Fighter): [number, number] {
 const ROAM_TIMEOUT = 10;
 /** ...or after this many consecutive stuck windows (0.5 s each) on the way. */
 const ROAM_GIVE_UP_STUCK = 4;
+/** Bots head for the zone when farther than `radius - ZONE_MARGIN` from its centre... */
+const ZONE_MARGIN = 3;
+/** ...and stay in zone mode until this much further inside, so they don't flip at the edge. */
+const ZONE_HYSTERESIS = 3;
+
+/** Distance from the safe centre beyond which a bot runs for the zone (the zone-mode trigger). */
+export function zoneEnterRadius(safe: Circle) {
+	return Math.max(2, safe.radius - ZONE_MARGIN);
+}
+
+/** A bot already running for the zone keeps going until it's at least this far inside. */
+export function zoneExitRadius(safe: Circle) {
+	const enter = zoneEnterRadius(safe);
+	return Math.max(1.5, enter - Math.min(ZONE_HYSTERESIS, enter * 0.25));
+}
+
+/** The circle bots treat as safe: the upcoming one once a shrink is imminent or under way. */
+export function safeCircle(world: World): Circle {
+	const zone = world.zone;
+	return zone.shrinking || zone.timer < 12 ? zone.to : zone.current;
+}
 
 /**
  * Re-evaluates the bot's mode. Goals are recomputed from the situation, except a roam goal,
@@ -73,8 +98,7 @@ const ROAM_GIVE_UP_STUCK = 4;
  */
 function think(world: World, f: Fighter) {
 	const b = f.bot!;
-	const zone = world.zone;
-	const safe = zone.shrinking || zone.timer < 12 ? zone.to : zone.current;
+	const safe = safeCircle(world);
 	const keptRoam = b.mode === 'roam' ? b.goal : null;
 
 	b.targetId = null;
@@ -94,7 +118,9 @@ function think(world: World, f: Fighter) {
 
 	// The zone centre may sit in a rock: head for the nearest free spot instead.
 	const safeCenter = clearSpot(safe.center, f.radius + 0.2);
-	if (dist(f.pos, safeCenter) > Math.max(2, safe.radius - 3)) {
+	const enterR = zoneEnterRadius(safe);
+	const zoneR = b.mode === 'zone' ? zoneExitRadius(safe) : enterR;
+	if (dist(f.pos, safeCenter) > zoneR) {
 		b.mode = 'zone';
 		b.goal = safeCenter;
 		return;
@@ -151,7 +177,13 @@ function think(world: World, f: Fighter) {
 		}
 	}
 
-	const loot = world.pickups.find((p) => dist(p.pos, f.pos) < 18 && isOfferable(getItem(p.itemId), f.items));
+	// Only chase things well inside the zone-mode trigger (the hysteresis band leaves room to
+	// stand beside them), or the next think sends the bot straight back to the zone.
+	const huntR = zoneExitRadius(safe);
+	const reachable = (p: Vec2) => dist(p, safeCenter) <= huntR;
+	const loot = world.pickups.find(
+		(p) => dist(p.pos, f.pos) < 18 && reachable(p.pos) && isOfferable(getItem(p.itemId), f.items)
+	);
 	if (loot) {
 		b.mode = 'loot';
 		b.goal = copyVec(loot.pos);
@@ -163,7 +195,7 @@ function think(world: World, f: Fighter) {
 	let prey: Unit | null = null;
 	let preyD = 28;
 	for (const m of world.monsters) {
-		if (!m.alive || m.tier > maxTier) continue;
+		if (!m.alive || m.tier > maxTier || !reachable(m.pos)) continue;
 		const d = dist(m.pos, f.pos);
 		if (d < preyD) {
 			preyD = d;
