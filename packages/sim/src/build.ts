@@ -1,4 +1,5 @@
 import { getItem, type AttackMode, type SkillId } from './items';
+import { runeMods } from './runes';
 import { deriveStats, type DerivedStats, type StatConversion, type StatMod } from './stats';
 import { emptyTagCounts, synergyTier, TAGS, type SynergyTier, type Tag } from './tags';
 
@@ -14,9 +15,10 @@ export interface BuildSummary {
 	projectile: 'arrow' | 'fireball';
 }
 
-export function summarizeBuild(itemIds: readonly string[]): BuildSummary {
+/** `runeIds` add flat stat mods only: runes never count toward tags or synergies. */
+export function summarizeBuild(itemIds: readonly string[], runeIds: readonly string[] = []): BuildSummary {
 	const base = emptyTagCounts();
-	const mods: StatMod[] = [];
+	const mods: StatMod[] = runeMods(runeIds);
 	const conversions: StatConversion[] = [];
 	const skills: SkillId[] = [];
 	const bridges: { from: Tag; to: Tag }[] = [];

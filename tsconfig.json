@@ -14,7 +14,9 @@
 		"isolatedModules": true,
 		"verbatimModuleSyntax": true,
 		"allowImportingTsExtensions": false,
-		"noEmit": true
+		"noEmit": true,
+		"jsx": "react-jsx",
+		"jsxImportSource": "preact"
 	},
 	"include": ["packages/*/src", "packages/*/scripts", "apps/*/src", "apps/*/scripts", "apps/*/vite.config.ts", "vitest.config.ts"]
 }

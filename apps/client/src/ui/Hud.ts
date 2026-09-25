@@ -20,21 +20,14 @@ import {
 	dist
 } from '@ofa/sim';
 import type { InputFeedbackEvent } from '../input/types';
-import { INPUT_THRESHOLD_PRESETS, type InputThresholdPresetId } from '../input/inputThresholdOptions';
 import type { Renderer } from '../render/Renderer';
 
+/** Menus, results and spectating are preact screens (./screens); the HUD is only the in-game layer. */
 export interface HudCallbacks {
 	command: (cmd: Command) => void;
-	start: () => void;
-	startTutorial: () => void;
 	toMenu: () => void;
-	restart: () => void;
-	spectate: () => void;
-	spectateNext: () => void;
 	skipTutorialStep: () => void;
 	buildOpened: () => void;
-	setInputPreset: (id: InputThresholdPresetId) => void;
-	inputPreset: () => InputThresholdPresetId | null;
 }
 
 /** What the HUD needs from the tutorial director (kept structural to avoid a dependency). */
@@ -153,7 +146,6 @@ export class Hud {
 			<div class="joystick" data-k="joy"><div class="knob" data-k="knob"></div></div>
 			<div class="sheet draft" data-k="draft"></div>
 			<div class="sheet buildpanel" data-k="build"></div>
-			<div class="overlay" data-k="overlay"></div>
 			<div class="floaters" data-k="floaters"></div>
 			<div class="hint" data-k="hint"></div>
 		`;
@@ -163,63 +155,6 @@ export class Hud {
 		this.el.levelBtn.addEventListener('click', () => this.toggleDraft());
 		this.el.buildBtn.addEventListener('click', () => this.toggleBuild());
 		this.el.hint.addEventListener('click', () => this.dismissHint());
-		// The start screen is shown by the menu stage's enter().
-	}
-
-	// ── Overlays
-
-	showStart() {
-		const o = this.el.overlay;
-		o.className = 'overlay show';
-		o.innerHTML = `
-			<div class="panel">
-				<h1>One Finger Royale</h1>
-				<p class="sub">한 손가락 3D 육성 배틀로얄 · 싱글 프로토타입 (봇 11명)</p>
-				<ul class="howto">
-					<li><b>시작 무기</b>로 근접/원거리가 정해집니다. 드래프트의 무기 카드로 교체 가능</li>
-					<li><b>탭</b> 공격 (자동 조준 · 3연타)</li>
-					<li><b>드래그</b> 이동 · 멀리 끌면 달리기</li>
-					<li><b>빠르게 두 번 스와이프</b> 대시 (무적)</li>
-					<li><b>레벨업</b> 버튼으로 3장 중 1장 선택 — 같은 태그 3·5개에서 시너지 발동</li>
-					<li>외곽은 안전·저효율, 중앙은 위험·고효율. 자기장은 따로 줄어듭니다.</li>
-				</ul>
-				<p class="keys">키보드: WASD 이동 · Space 공격 · Shift 대시 · E 드래프트 · 1/2/3 선택 · R 리롤 · B 빌드</p>
-				<div class="row menu">
-					<button class="btn big" data-act="tutorial">📘 튜토리얼<small>조작·빌드 단계별 연습 (약 3분)</small></button>
-					<button class="btn big primary" data-act="start">⚔ 본 게임<small>봇 11명과 배틀로얄</small></button>
-				</div>
-				<div class="row presets">
-					<span>입력 감도</span>
-					${(Object.keys(INPUT_THRESHOLD_PRESETS) as InputThresholdPresetId[])
-						.map(
-							(id) =>
-								`<button class="btn tiny ${this.cb.inputPreset() === id ? 'on' : ''}" data-preset="${id}">${INPUT_THRESHOLD_PRESETS[id].label}</button>`
-						)
-						.join('')}
-				</div>
-				<button class="btn tiny ghost" data-act="hints">본 게임 도움말 힌트 다시 보기</button>
-			</div>`;
-		o.querySelectorAll<HTMLElement>('[data-preset]').forEach((el) =>
-			el.addEventListener('click', () => {
-				this.cb.setInputPreset(el.dataset.preset as InputThresholdPresetId);
-				o.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('on', b === el));
-			})
-		);
-		o.querySelector('[data-act=start]')!.addEventListener('click', () => {
-			o.className = 'overlay';
-			this.cb.start();
-		});
-		o.querySelector('[data-act=tutorial]')!.addEventListener('click', () => {
-			o.className = 'overlay';
-			this.cb.startTutorial();
-		});
-		o.querySelector<HTMLButtonElement>('[data-act=hints]')!.addEventListener('click', (ev) => {
-			this.seenHints.clear();
-			saveSeenHints(this.seenHints);
-			const btn = ev.currentTarget as HTMLButtonElement;
-			btn.textContent = '힌트 초기화됨';
-			btn.disabled = true;
-		});
 	}
 
 	reset() {
@@ -228,7 +163,6 @@ export class Hud {
 		this.draftKey = '';
 		this.buildKey = '';
 		this.tagKey = '';
-		this.el.overlay.className = 'overlay';
 		this.el.feed.innerHTML = '';
 		this.el.toasts.innerHTML = '';
 		this.hintQueue = [];
@@ -266,31 +200,6 @@ export class Hud {
 		if (!done) this.el.tut.classList.remove('flash'), void this.el.tut.offsetWidth, this.el.tut.classList.add('flash');
 	}
 
-	showTutorialDone() {
-		const o = this.el.overlay;
-		this.toggleDraft(false);
-		this.toggleBuild(false);
-		o.className = 'overlay show';
-		o.innerHTML = `
-			<div class="panel">
-				<h1>🎓 튜토리얼 완료!</h1>
-				<p class="sub">본 게임에서는 자기장이 점점 줄어들고, 11명의 봇과 최후의 1인을 가립니다.</p>
-				<ul class="howto">
-					<li>외곽은 안전하지만 저효율, 중앙은 위험하지만 고효율</li>
-					<li>페이즈마다 드래프트 자원이 바뀝니다: 스탯 → 스킬 → 전설(브릿지)</li>
-					<li>처치하면 상대 아이템 1개가 떨어져요</li>
-				</ul>
-				<div class="row">
-					<button class="btn" data-act="again">튜토리얼 다시</button>
-					<button class="btn" data-act="menu">메뉴</button>
-					<button class="btn primary" data-act="start">본 게임 시작</button>
-				</div>
-			</div>`;
-		o.querySelector('[data-act=again]')!.addEventListener('click', () => this.cb.startTutorial());
-		o.querySelector('[data-act=menu]')!.addEventListener('click', () => this.cb.toMenu());
-		o.querySelector('[data-act=start]')!.addEventListener('click', () => this.cb.start());
-	}
-
 	/** Called when a match begins: the first decision is the starting weapon. */
 	onMatchStart() {
 		this.toggleDraft(true);
@@ -301,6 +210,12 @@ export class Hud {
 	}
 
 	// ── Tutorial hints: each shows once (per browser), when it becomes relevant.
+
+	/** Settings → "show hints again". */
+	resetHints() {
+		this.seenHints.clear();
+		saveSeenHints(this.seenHints);
+	}
 
 	private hint(id: string, text: string) {
 		// The tutorial mode has its own step panel; one-off hints are for real matches.
@@ -330,42 +245,13 @@ export class Hud {
 		this.hintTimer = HINT_SECONDS;
 	}
 
-	/** Result panel. Which screen is up is decided by the stages (game/stages.ts), not here. */
-	showGameOver(world: World, me: Fighter) {
+	// ── Draft & build sheets
+
+	/** Result/spectate/tutorial-done panels cover the sheets. */
+	closeSheets() {
 		this.toggleDraft(false);
 		this.toggleBuild(false);
-		const won = world.winner === me.id;
-		const o = this.el.overlay;
-		o.className = 'overlay show';
-		const items = me.items.map((id) => getItem(id).name).join(', ') || '없음';
-		o.innerHTML = `
-			<div class="panel">
-				<h1>${won ? '🏆 최후의 1인!' : `#${me.placement} 탈락`}</h1>
-				<p class="sub">Lv ${me.level} · 처치 ${me.kills} · ${Math.floor(world.time)}초 생존</p>
-				<div class="tags">${TAGS.filter((t) => me.build.tagCounts[t] > 0)
-					.map((t) => tagChip(t, ` ${me.build.tagCounts[t]}`, me.build.tiers[t] ? 'on' : ''))
-					.join('')}</div>
-				<p class="items">${items}</p>
-				<div class="row">
-					<button class="btn" data-act="menu">메뉴</button>
-					<button class="btn primary" data-act="restart">다시 하기</button>
-					${world.over ? '' : '<button class="btn" data-act="spectate">관전</button>'}
-				</div>
-			</div>`;
-		o.querySelector('[data-act=restart]')!.addEventListener('click', () => this.cb.restart());
-		o.querySelector('[data-act=menu]')!.addEventListener('click', () => this.cb.toMenu());
-		o.querySelector('[data-act=spectate]')?.addEventListener('click', () => this.cb.spectate());
 	}
-
-	showSpectate() {
-		const o = this.el.overlay;
-		o.className = 'overlay spectate';
-		o.innerHTML = `<div class="spectate-bar"><span>관전 중</span><button class="btn" data-act="next">다음</button><button class="btn primary" data-act="restart">다시 하기</button></div>`;
-		o.querySelector('[data-act=next]')!.addEventListener('click', () => this.cb.spectateNext());
-		o.querySelector('[data-act=restart]')!.addEventListener('click', () => this.cb.restart());
-	}
-
-	// ── Draft & build sheets
 
 	toggleDraft(force?: boolean) {
 		this.draftOpen = force ?? !this.draftOpen;
@@ -423,7 +309,7 @@ export class Hud {
 		}
 		const cards = me.offer!.map((id, i) => {
 			const item = getItem(id);
-			const next = summarizeBuild([...me.items, id]);
+			const next = summarizeBuild([...me.items, id], me.runes);
 			const tags = item.tags
 				.map((t) => {
 					const up = next.tiers[t] > now.tiers[t];

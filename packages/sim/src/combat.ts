@@ -89,7 +89,7 @@ export function gainXp(world: World, f: Fighter, amount: number) {
 
 export function applyBuild(world: World, f: Fighter) {
 	const before = f.build;
-	f.build = summarizeBuild(f.items);
+	f.build = summarizeBuild(f.items, f.runes);
 	const gained = f.build.stats.maxHp - f.maxHp;
 	f.maxHp = f.build.stats.maxHp;
 	if (gained > 0) f.hp += gained;

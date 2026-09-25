@@ -75,6 +75,8 @@ export interface Fighter extends UnitBase {
 	level: number;
 	xp: number;
 	items: string[];
+	/** Pre-match runes (shop loadout), fixed for the whole match. */
+	runes: string[];
 	build: BuildSummary;
 	shield: number;
 	sinceHurt: number;
