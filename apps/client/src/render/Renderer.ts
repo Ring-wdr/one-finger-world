@@ -23,6 +23,15 @@ import { ZoneWall } from './zoneWall';
 const toThree = (p: Vec2, y = 0) => new THREE.Vector3(p.x, y, -p.y);
 /** Yaw that points a −Z-forward object along sim direction (dx, dy). */
 const facingAngle = (dx: number, dy: number) => Math.atan2(-dx, dy);
+/** Per-tick step below which a monster keeps its heading, so jitter can't flip it around. */
+const HEADING_MIN_STEP = 0.02;
+/** How fast a monster turns toward its heading (1/s, exponential). */
+const TURN_RATE = 14;
+/** Signed shortest turn from angle `a` to angle `b`, in (−π, π]. */
+const angleDelta = (a: number, b: number) => {
+	const d = (b - a) % (Math.PI * 2);
+	return d > Math.PI ? d - Math.PI * 2 : d <= -Math.PI ? d + Math.PI * 2 : d;
+};
 
 /** Fixed camera angle. It only ever translates (damped) — never rotates, shakes or bobs. */
 const CAMERA_OFFSET = new THREE.Vector3(0, 26, 17);
@@ -69,7 +78,10 @@ interface FighterView extends ModelSlot {
 interface MonsterView extends ModelSlot {
 	root: THREE.Group;
 	bar: Bar;
+	/** Where it wants to face. */
 	heading: number;
+	/** Where it faces now, easing toward `heading`. */
+	yaw: number;
 }
 
 interface PickupView extends ModelSlot {
@@ -416,7 +428,7 @@ export class Renderer {
 		root.add(model.object, bar.group);
 		this.scene.add(root);
 		// Face the camera until it first moves or picks a target.
-		v = { root, model, tag: this.assets.tag(key), bar, heading: Math.PI };
+		v = { root, model, tag: this.assets.tag(key), bar, heading: Math.PI, yaw: Math.PI };
 		this.monsters.set(m.id, v);
 		return v;
 	}
@@ -531,18 +543,21 @@ export class Renderer {
 			const p = lerpPos(m.id, m.pos);
 			v.root.position.copy(toThree(p));
 			const was = prev.get(m.id);
-			const moving = was !== undefined && Math.hypot(m.pos.x - was.x, m.pos.y - was.y) > 1e-4;
-			const target = !moving && m.targetId !== null ? world.fighters.find((f) => f.id === m.targetId) : undefined;
+			const step = was === undefined ? 0 : Math.hypot(m.pos.x - was.x, m.pos.y - was.y);
+			const moving = step > 1e-4;
+			const walking = was !== undefined && step > HEADING_MIN_STEP;
+			const target = !walking && m.targetId !== null ? world.fighters.find((f) => f.id === m.targetId) : undefined;
 			// Face where it walks, or whoever it's standing still to hit.
-			if (moving) v.heading = facingAngle(m.pos.x - was.x, m.pos.y - was.y);
+			if (walking) v.heading = facingAngle(m.pos.x - was.x, m.pos.y - was.y);
 			else if (target) v.heading = facingAngle(target.pos.x - m.pos.x, target.pos.y - m.pos.y);
+			v.yaw += angleDelta(v.yaw, v.heading) * (1 - Math.exp(-TURN_RATE * dt));
 			const obj = v.model.object;
 			if (v.model.isFallback) {
 				// Floating, spinning gem.
 				obj.rotation.y = this.clock * 0.8 + m.id;
 				obj.position.y = m.radius + 0.1 + Math.sin(this.clock * 3 + m.id) * 0.08;
 			} else {
-				obj.rotation.y = v.heading;
+				obj.rotation.y = v.yaw;
 			}
 			const k = hitK(m.id);
 			obj.scale.setScalar(1 + k * 0.25);
