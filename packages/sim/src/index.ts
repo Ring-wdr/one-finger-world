@@ -5,6 +5,7 @@ export * from './tags';
 export * from './stats';
 export * from './items';
 export * from './build';
+export * from './runes';
 export * from './draft';
 export * from './zone';
 export {

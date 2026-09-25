@@ -19,6 +19,7 @@ import { spawnMonsters, updateMonster } from './monsters';
 import { newNav } from './nav';
 import { clearSpot, moveWithCollision, resolveObstacles } from './obstacles';
 import { Rng } from './rng';
+import { runeRerolls, sanitizeRunes } from './runes';
 import { newStatus } from './status';
 import { TAGS } from './tags';
 import {
@@ -51,6 +52,8 @@ export interface WorldOptions {
 	fighters: number;
 	/** Name for the human player (id is returned as `playerId`). Omit for an all-bot match. */
 	playerName?: string;
+	/** Rune loadout for the human player (bots play without runes). */
+	playerRunes?: readonly string[];
 	/** No spawns, zone, phases or win check — the caller scripts the world (tutorial). */
 	sandbox?: boolean;
 }
@@ -92,7 +95,8 @@ export function createWorld(opts: WorldOptions): { world: World; playerId: numbe
 			name: isPlayer ? opts.playerName! : names[i % names.length],
 			color: isPlayer ? '#ffffff' : COLORS[i % COLORS.length],
 			pos,
-			bot: !isPlayer
+			bot: !isPlayer,
+			runes: isPlayer ? opts.playerRunes : undefined
 		});
 		if (isPlayer) playerId = f.id;
 	}
@@ -109,10 +113,12 @@ export interface SpawnFighterOptions {
 	pos: { x: number; y: number };
 	bot: boolean;
 	aggressive?: boolean;
+	runes?: readonly string[];
 }
 
 export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
-	const build = summarizeBuild([]);
+	const runes = sanitizeRunes(o.runes ?? []);
+	const build = summarizeBuild([], runes);
 	const rng = world.rng;
 	const id = world.nextId++;
 	const pos = clearSpot(o.pos, 0.7 + 0.1);
@@ -146,6 +152,7 @@ export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
 		level: 1,
 		xp: 0,
 		items: [],
+		runes,
 		build,
 		shield: 0,
 		sinceHurt: 0,
@@ -163,7 +170,7 @@ export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
 		// The opening pick is always the weapon: it decides melee vs ranged.
 		pendingDrafts: 1,
 		offer: [...WEAPON_IDS],
-		rerolls: START_REROLLS,
+		rerolls: START_REROLLS + runeRerolls(runes),
 		exchangeTokens: 0,
 		kills: 0,
 		placement: null,
