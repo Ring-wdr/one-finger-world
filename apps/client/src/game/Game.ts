@@ -1,14 +1,14 @@
 import { effect } from '@preact/signals';
 import { createWorld, DT, step, TAGS, type Command, type Fighter, type GameEvent, type Vec2, type World } from '@ofa/sim';
 import { profile, result, settings, stage, tutorialDone, type GameActions } from '../app/store';
-import { Sfx, type SfxId } from '../audio/Sfx';
+import { sfx } from '../app/sound';
+import type { SfxId } from '../audio/Sfx';
 import { InputController } from '../input/InputController';
 import { inputThresholdOptionsToThresholds, type InputThresholdOptions } from '../input/inputThresholdOptions';
 import { Keyboard } from '../input/Keyboard';
 import type { InputGesture } from '../input/types';
 import { equippedRunes, grantReward } from '../meta/profile';
 import { scoreMatch, type MatchReward } from '../meta/rewards';
-import { sfxGain } from '../meta/settings';
 import { Renderer } from '../render/Renderer';
 import { Tutorial } from '../tutorial/Tutorial';
 import { Hud } from '../ui/Hud';
@@ -32,7 +32,6 @@ export class Game implements StageHost, GameActions {
 	private inputOptions: InputThresholdOptions;
 	private readonly keyboard: Keyboard;
 	private readonly stages: StageManager;
-	private readonly sfx = new Sfx();
 	private readonly disposeSettings: () => void;
 	/** The current match already paid out (the result panel is shown again after spectating). */
 	private rewarded = false;
@@ -44,9 +43,10 @@ export class Game implements StageHost, GameActions {
 
 	constructor(
 		private readonly canvas: HTMLCanvasElement,
-		hudRoot: HTMLElement
+		hudRoot: HTMLElement,
+		onAssetProgress?: (done: number, total: number) => void
 	) {
-		this.renderer = new Renderer(canvas);
+		this.renderer = new Renderer(canvas, onAssetProgress);
 		this.inputOptions = settings.value.input;
 		this.hud = new Hud(hudRoot, this.renderer, {
 			command: (c) => this.queue(c),
@@ -69,10 +69,9 @@ export class Game implements StageHost, GameActions {
 		this.stages = new StageManager(createStages(this, (next) => this.go(next)), 'menu');
 		stage.value = this.stages.id;
 
-		// Settings screen → live audio level and touch thresholds.
+		// Settings screen → live touch thresholds.
 		this.disposeSettings = effect(() => {
 			const s = settings.value;
-			this.sfx.setVolume(sfxGain(s));
 			if (!sameInput(s.input, this.inputOptions)) {
 				this.inputOptions = s.input;
 				this.input.dispose();
@@ -97,7 +96,7 @@ export class Game implements StageHost, GameActions {
 		);
 	}
 
-	// ── GameActions: what the preact screens (../ui/screens) can ask for.
+	// ── GameActions: what the preact screens (../ui/screens) can ask for, via ../app/gameHost.
 
 	go(next: StageId) {
 		if (this.stages.go(next)) stage.value = next;
@@ -114,12 +113,9 @@ export class Game implements StageHost, GameActions {
 		this.focusId = alive[(i + 1) % alive.length].id;
 	}
 
-	resetHints() {
-		this.hud.resetHints();
-	}
-
-	click() {
-		this.sfx.play('ui');
+	/** Resolves once the 3D models are in (or fell back to primitives). */
+	get ready(): Promise<void> {
+		return this.renderer.ready;
 	}
 
 	private player(): Fighter | undefined {
@@ -204,7 +200,7 @@ export class Game implements StageHost, GameActions {
 			reward = scoreMatch({ placement, fighters: w.fighters.length, kills: me.kills, level: me.level, time: w.time });
 			newBest = reward.score > profile.value.best;
 			profile.value = grantReward(profile.value, reward.coins, reward.score);
-			this.sfx.play(won ? 'win' : 'lose');
+			sfx.play(won ? 'win' : 'lose');
 		}
 		const prev = result.value;
 		result.value = {
@@ -334,7 +330,7 @@ export class Game implements StageHost, GameActions {
 					if (e.kind === 'fighter' && e.killer === me) id = 'kill';
 					break;
 			}
-			if (id) this.sfx.play(id);
+			if (id) sfx.play(id);
 		}
 		if (hurt && settings.value.vibrate) navigator.vibrate?.(30);
 	}
@@ -368,7 +364,6 @@ export class Game implements StageHost, GameActions {
 	dispose() {
 		cancelAnimationFrame(this.raf);
 		this.disposeSettings();
-		this.sfx.dispose();
 		this.input.dispose();
 		this.keyboard.dispose();
 		window.removeEventListener('resize', this.onResize);

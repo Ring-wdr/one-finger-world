@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { RUNE_SLOT_INFO, RUNE_SLOTS, RUNES, type RuneDef } from '@ofa/sim';
-import { menuView, profile, type GameActions } from '../../app/store';
+import { sfx } from '../../app/sound';
+import { menuView, profile } from '../../app/store';
 import { buyRune, toggleRune } from '../../meta/profile';
 import { modText, Page } from './common';
 
@@ -10,7 +11,7 @@ function runeEffect(r: RuneDef) {
 	return parts.join(' · ');
 }
 
-export function ShopScreen({ game }: { game: GameActions }) {
+export function ShopScreen() {
 	const p = profile.value;
 	const [flash, setFlash] = useState<string | null>(null);
 	useEffect(() => {
@@ -26,12 +27,12 @@ export function ShopScreen({ game }: { game: GameActions }) {
 				setFlash(next === 'coins' ? `코인이 ${r.cost - p.coins} 부족해요` : null);
 				return;
 			}
-			game.click();
+			sfx.play('ui');
 			profile.value = next;
 			setFlash(`${r.name} 구매 완료`);
 			return;
 		}
-		game.click();
+		sfx.play('ui');
 		profile.value = toggleRune(p, r.id);
 		setFlash(null);
 	};

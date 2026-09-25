@@ -53,7 +53,4 @@ export interface GameActions {
 	/** Restart whatever mode is running (match or tutorial). */
 	restart(): void;
 	spectateNext(): void;
-	resetHints(): void;
-	/** UI click sound. */
-	click(): void;
 }

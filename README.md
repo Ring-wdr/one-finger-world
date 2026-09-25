@@ -50,6 +50,7 @@ packages/sim     결정론적 게임 로직 (렌더러·DOM 의존 없음) — �
   scripts/balance.ts  헤드리스 밸런스 러너
 apps/client      Vite + Three.js + Preact 클라이언트
   app/store.ts   Preact signals: 현재 stage, 메뉴 화면, 결과, 설정·프로필(자동 저장)
+  app/gameHost.ts  게임(three.js·sim·HUD)과 모델을 첫 플레이 때만 동적 import + 로딩 화면
   meta/          점수→코인, 프로필/상점(구매·장착), 설정 — DOM 없는 순수 로직
   audio/         WebAudio 합성 효과음 (에셋 파일 없음)
   input/         InputController (기존 조작법 유지) + 키보드 폴백
@@ -59,6 +60,10 @@ apps/client      Vite + Three.js + Preact 클라이언트
   tutorial/      튜토리얼 디렉터 (DOM 없는 순수 로직, 오토파일럿 테스트로 완주 검증)
   game/          모드 전환(메뉴/본 게임/튜토리얼) + 고정 틱 루프 (20Hz sim, rAF 렌더 보간)
 ```
+
+## 로딩 전략
+- 첫 화면 번들은 메뉴(Preact·설정·상점)만 담습니다 (~80KB, gzip ~30KB). three.js·렌더러·HUD·게임 루프는 `Game` 청크로 분리되어, **본 게임/튜토리얼을 처음 누를 때** 모델(.glb 10개, 약 2.7MB)과 함께 받습니다. 진행률은 로딩 화면에 파일 단위로 표시됩니다.
+- 한 번 불러오면 게임은 계속 살아 있고, 메뉴로 돌아오면 3D 월드가 메뉴 배경으로 렌더링됩니다.
 
 ## 설계 요약
 

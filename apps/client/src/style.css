@@ -1068,3 +1068,26 @@ body {
 	text-align: right;
 	margin-top: 4px;
 }
+
+/* ── Loading (first play downloads the game chunk + models) */
+.loading-panel .load-bar {
+	height: 8px;
+	margin: 14px 0 8px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.08);
+	overflow: hidden;
+}
+.loading-panel .load-bar i {
+	display: block;
+	height: 100%;
+	background: var(--gold);
+	transition: width 0.25s;
+}
+/* Before the game is loaded there is no 3D backdrop behind the menu. */
+#app:not([data-game]) {
+	background: radial-gradient(120% 80% at 50% 0%, #243247 0%, var(--bg) 60%);
+}
+#app:not([data-game]) #scene,
+#app:not([data-game]) #hud {
+	display: none;
+}

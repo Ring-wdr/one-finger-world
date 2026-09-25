@@ -107,8 +107,11 @@ export class AssetLibrary {
 		private readonly load: LoadFn = loadGltf
 	) {}
 
-	/** Loads every manifest model. Never rejects: failures are logged and keep the fallback. */
-	async preload(): Promise<void> {
+	/**
+	 * Loads every manifest model. Never rejects: failures are logged and keep the fallback.
+	 * `onProgress` counts files (several models can share one), failed ones included.
+	 */
+	async preload(onProgress?: (done: number, total: number) => void): Promise<void> {
 		const models: [string, ModelSpec][] = [];
 		for (const [key, entry] of Object.entries(this.manifest)) {
 			if (!entry) continue;
@@ -116,10 +119,14 @@ export class AssetLibrary {
 			else models.push([key, entry]);
 		}
 		const files = new Map<string, Promise<GltfLike>>();
+		const total = new Set(models.map(([, spec]) => spec.url)).size;
+		let done = 0;
+		onProgress?.(0, total);
 		await Promise.all(
 			models.map(async ([id, spec]) => {
 				try {
-					if (!files.has(spec.url)) files.set(spec.url, this.load(spec.url));
+					// Counted before anyone awaits the file, so progress ends at total/total before preload resolves.
+					if (!files.has(spec.url)) files.set(spec.url, this.load(spec.url).finally(() => onProgress?.(++done, total)));
 					const gltf = await files.get(spec.url)!;
 					if (this.disposed) return;
 					const source = spec.node === undefined ? gltf.scene : gltf.scene.getObjectByName(spec.node);
