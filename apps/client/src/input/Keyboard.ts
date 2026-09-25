@@ -1,5 +1,11 @@
 import type { Command } from '@ofa/sim';
 
+/** Every key the game reads; during play their browser defaults (Ctrl+R reload, Space/Enter on a focused button, …) are suppressed. */
+const GAME_KEYS = new Set([
+	'w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
+	' ', 'j', 'k', 'shift', 'control', 'e', 'b', 'r', '1', '2', '3', 'escape', 'enter'
+]);
+
 /** Desktop fallback so the prototype is testable without a touch screen. */
 export class Keyboard {
 	private readonly held = new Set<string>();
@@ -7,7 +13,9 @@ export class Keyboard {
 
 	constructor(
 		private readonly emit: (cmd: Command) => void,
-		private readonly onUiKey: (key: string) => boolean
+		private readonly onUiKey: (key: string) => boolean,
+		/** Whether a match/tutorial is taking gameplay input (menus keep normal browser keys). */
+		private readonly playing: () => boolean
 	) {
 		window.addEventListener('keydown', this.onDown);
 		window.addEventListener('keyup', this.onUp);
@@ -21,8 +29,16 @@ export class Keyboard {
 	}
 
 	private readonly onDown = (e: KeyboardEvent) => {
-		if (e.repeat) return;
 		const k = e.key.toLowerCase();
+		if (this.playing()) {
+			// A HUD button clicked earlier keeps focus; Space/Enter would then "click" it
+			// (e.g. the tutorial's 나가기 → main menu), so gameplay keys never go to it.
+			const focused = document.activeElement;
+			if (focused instanceof HTMLElement && focused !== document.body) focused.blur();
+			// Walking holds Ctrl, so Ctrl+R/E/B/1… must not reach the browser (Ctrl+R reloads to the menu).
+			if (GAME_KEYS.has(k)) e.preventDefault();
+		}
+		if (e.repeat) return;
 		if (this.onUiKey(k)) {
 			e.preventDefault();
 			return;

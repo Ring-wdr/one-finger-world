@@ -64,7 +64,8 @@ export class Game implements StageHost, GameActions {
 		this.input = this.createInput();
 		this.keyboard = new Keyboard(
 			(c) => this.queue(c),
-			(k) => this.stages.uiKey(k)
+			(k) => this.stages.uiKey(k),
+			() => this.stages.acceptsInput
 		);
 		this.stages = new StageManager(createStages(this, (next) => this.go(next)), 'menu');
 		stage.value = this.stages.id;
