@@ -11,20 +11,29 @@ import {
 	type Vec2,
 	type World
 } from '@ofa/sim';
+import { AssetLibrary } from './assets/AssetLibrary';
+import type { ModelInstance } from './assets/ModelInstance';
+import type { AssetKey, InstanceOptions } from './assets/types';
 
 /** sim (x, y) lies on the ground plane; screen-up = sim +y = three −z. */
 const toThree = (p: Vec2, y = 0) => new THREE.Vector3(p.x, y, -p.y);
+/** Yaw that points a −Z-forward object along sim direction (dx, dy). */
+const facingAngle = (dx: number, dy: number) => Math.atan2(-dx, dy);
 
 /** Fixed camera angle. It only ever translates (damped) — never rotates, shakes or bobs. */
 const CAMERA_OFFSET = new THREE.Vector3(0, 26, 17);
 const FOLLOW_RATE = 5;
 
 const RARITY_COLOR = { common: 0xcfd8dc, rare: 0x42a5f5, legendary: 0xffca28 } as const;
-const MONSTER_LOOK = {
-	1: { color: 0x7bc96f, geo: () => new THREE.IcosahedronGeometry(0.6, 0) },
-	2: { color: 0x9b6bd6, geo: () => new THREE.DodecahedronGeometry(0.85, 0) },
-	3: { color: 0xd9534f, geo: () => new THREE.OctahedronGeometry(1.2, 0) }
-} as const;
+/** Training dummies read as straw-coloured and inert. */
+const DUMMY_COLOR = 0xc9b37e;
+const monsterKey = (m: Monster): AssetKey => `monster${m.tier}`;
+
+/** A corpse lies still this long after its death clip ends, then sinks out of sight. */
+const CORPSE_HOLD = 1.2;
+const CORPSE_SINK = 0.8;
+const CORPSE_DEPTH = 1.5;
+const NO_GLOW = new THREE.Color(0, 0, 0);
 
 interface Bar {
 	group: THREE.Group;
@@ -32,20 +41,42 @@ interface Bar {
 	shield: THREE.Mesh;
 }
 
-interface FighterView {
+/** A model inside a parent group, swapped in place when its asset tag changes. */
+interface ModelSlot {
+	model: ModelInstance;
+	/** `AssetLibrary.tag` the model was built for. */
+	tag: string;
+}
+
+interface FighterView extends ModelSlot {
 	root: THREE.Group;
 	/** Rotates with facing; the root only translates so bars stay camera-aligned. */
 	spin: THREE.Group;
-	body: THREE.Mesh<THREE.CapsuleGeometry, THREE.MeshStandardMaterial>;
-	nose: THREE.Mesh;
 	bubble: THREE.Mesh;
+	/** Textured models don't take the fighter's colour, so it goes on the ground instead. */
+	teamRing: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
 	bar: Bar;
 }
 
-interface MonsterView {
+interface MonsterView extends ModelSlot {
 	root: THREE.Group;
-	body: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 	bar: Bar;
+	heading: number;
+}
+
+interface PickupView extends ModelSlot {
+	root: THREE.Group;
+	beam: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+}
+
+/** A dead unit's model left in place to play out its death clip. */
+interface Corpse {
+	root: THREE.Object3D;
+	model: ModelInstance;
+	age: number;
+	/** When sinking starts. */
+	hold: number;
+	remove: () => void;
 }
 
 interface Fx {
@@ -65,11 +96,16 @@ export class Renderer {
 
 	private readonly fighters = new Map<number, FighterView>();
 	private readonly monsters = new Map<number, MonsterView>();
-	private readonly projectiles = new Map<number, THREE.Mesh>();
-	private readonly pickups = new Map<number, THREE.Group>();
+	private readonly projectiles = new Map<number, ModelInstance>();
+	private readonly pickups = new Map<number, PickupView>();
 	private readonly hitAt = new Map<number, number>();
+	/** Units whose `death` event arrived since the last render. */
+	private readonly dying = new Set<number>();
+	private corpses: Corpse[] = [];
 	private fx: Fx[] = [];
 	private clock = 0;
+	private props: THREE.InstancedMesh[] = [];
+	private propsTag = '';
 
 	private readonly zoneWall: THREE.Mesh;
 	private readonly nextRing: THREE.Mesh;
@@ -79,14 +115,10 @@ export class Renderer {
 	private goalRadius = 1;
 
 	private readonly geo = {
-		capsule: new THREE.CapsuleGeometry(0.55, 0.8, 4, 12),
-		nose: new THREE.ConeGeometry(0.22, 0.5, 10).rotateX(-Math.PI / 2),
 		bubble: new THREE.SphereGeometry(1.2, 20, 14),
+		teamRing: new THREE.RingGeometry(0.62, 0.8, 32).rotateX(-Math.PI / 2),
 		barBg: new THREE.PlaneGeometry(1, 0.16),
 		barFill: new THREE.PlaneGeometry(1, 0.16).translate(0.5, 0, 0),
-		arrow: new THREE.BoxGeometry(0.12, 0.12, 0.9),
-		fireball: new THREE.SphereGeometry(0.45, 12, 10),
-		pickup: new THREE.BoxGeometry(0.6, 0.6, 0.6),
 		beam: new THREE.CylinderGeometry(0.08, 0.08, 6, 6, 1, true)
 	};
 	private readonly mat = {
@@ -94,13 +126,17 @@ export class Renderer {
 		barHp: new THREE.MeshBasicMaterial({ color: 0x5ee06a, depthTest: false }),
 		barEnemy: new THREE.MeshBasicMaterial({ color: 0xff5a5a, depthTest: false }),
 		barShield: new THREE.MeshBasicMaterial({ color: 0x9fd4ff, depthTest: false }),
-		nose: new THREE.MeshStandardMaterial({ color: 0x222831 }),
-		bubble: new THREE.MeshBasicMaterial({ color: 0x9fd4ff, transparent: true, opacity: 0.18, depthWrite: false }),
-		arrow: new THREE.MeshBasicMaterial({ color: 0xe8f1ff }),
-		fireball: new THREE.MeshBasicMaterial({ color: 0xff8a3d })
+		bubble: new THREE.MeshBasicMaterial({ color: 0x9fd4ff, transparent: true, opacity: 0.18, depthWrite: false })
 	};
+	private readonly glow = new THREE.Color();
 
-	constructor(canvas: HTMLCanvasElement) {
+	constructor(
+		canvas: HTMLCanvasElement,
+		private readonly assets = new AssetLibrary()
+	) {
+		// Primitives render immediately; models swap in as they arrive.
+		void this.assets.preload();
+
 		this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 		this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -159,18 +195,17 @@ export class Renderer {
 
 	/** Drop every entity view — call when switching to a different World. */
 	reset() {
-		for (const v of this.fighters.values()) {
-			this.scene.remove(v.root);
-			v.body.material.dispose();
-		}
+		for (const v of this.fighters.values()) this.removeFighter(v);
 		for (const v of this.monsters.values()) {
 			this.scene.remove(v.root);
-			v.body.geometry.dispose();
-			v.body.material.dispose();
+			v.model.dispose();
 		}
-		for (const m of this.projectiles.values()) this.scene.remove(m);
-		for (const g of this.pickups.values()) this.scene.remove(g);
+		for (const v of this.pickups.values()) this.removePickup(v);
+		for (const m of this.projectiles.values()) m.dispose();
 		for (const e of this.fx) this.scene.remove(e.obj);
+		for (const c of this.corpses) c.remove();
+		this.corpses = [];
+		this.dying.clear();
 		this.fighters.clear();
 		this.monsters.clear();
 		this.projectiles.clear();
@@ -205,39 +240,51 @@ export class Renderer {
 			new THREE.MeshStandardMaterial({ color: 0x1a2027, roughness: 1 })
 		);
 		this.scene.add(outside);
+		this.buildProps();
+	}
 
-		// Static props give the eye fixed landmarks, which reduces perceived motion.
+	/**
+	 * Static props give the eye fixed landmarks, which reduces perceived motion.
+	 * Rebuilt (same seeded layout) when a rock or tree model arrives.
+	 */
+	private buildProps() {
+		const tag = `${this.assets.tag('rock')}|${this.assets.tag('tree')}`;
+		if (tag === this.propsTag) return;
+		this.propsTag = tag;
+		for (const p of this.props) {
+			this.scene.remove(p);
+			p.dispose();
+		}
+		this.props = [];
+
 		const rng = new Rng(1234);
-		const rock = new THREE.InstancedMesh(
-			new THREE.DodecahedronGeometry(0.8, 0),
-			new THREE.MeshStandardMaterial({ color: 0x6d7580, roughness: 1, flatShading: true }),
-			220
-		);
-		const tree = new THREE.InstancedMesh(
-			new THREE.ConeGeometry(0.9, 2.6, 7).translate(0, 1.3, 0),
-			new THREE.MeshStandardMaterial({ color: 0x3f7a4a, roughness: 1, flatShading: true }),
-			160
-		);
-		const m = new THREE.Matrix4();
-		for (let i = 0; i < rock.count; i++) {
+		const place = (r: number, yaw: number, s: number) =>
+			new THREE.Matrix4().compose(
+				new THREE.Vector3(Math.cos(yaw) * r, 0, Math.sin(yaw) * r),
+				new THREE.Quaternion(),
+				new THREE.Vector3(s, s, s)
+			);
+		const rocks: THREE.Matrix4[] = [];
+		for (let i = 0; i < 220; i++) {
 			const r = Math.sqrt(rng.next()) * MAP_RADIUS;
 			const a = rng.range(0, Math.PI * 2);
 			const s = rng.range(0.4, 1.4);
-			m.compose(
-				new THREE.Vector3(Math.cos(a) * r, 0.2 * s, Math.sin(a) * r),
-				new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng.range(0, 6), 0)),
-				new THREE.Vector3(s, s * 0.7, s)
-			);
-			rock.setMatrixAt(i, m);
+			rocks.push(place(r, a, s).multiply(new THREE.Matrix4().makeRotationY(rng.range(0, 6))));
 		}
-		for (let i = 0; i < tree.count; i++) {
+		const trees: THREE.Matrix4[] = [];
+		for (let i = 0; i < 160; i++) {
 			const r = RING.mid + rng.next() * (MAP_RADIUS - RING.mid);
 			const a = rng.range(0, Math.PI * 2);
-			const s = rng.range(0.7, 1.3);
-			m.compose(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r), new THREE.Quaternion(), new THREE.Vector3(s, s, s));
-			tree.setMatrixAt(i, m);
+			trees.push(place(r, a, rng.range(0.7, 1.3)));
 		}
-		this.scene.add(rock, tree);
+		for (const [key, matrices] of [['rock', rocks], ['tree', trees]] as const) {
+			for (const part of this.assets.instancedParts(key)) {
+				const mesh = new THREE.InstancedMesh(part.geometry, part.material, matrices.length);
+				matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
+				this.props.push(mesh);
+				this.scene.add(mesh);
+			}
+		}
 	}
 
 	resize(width: number, height: number) {
@@ -274,55 +321,127 @@ export class Renderer {
 		bar.group.quaternion.copy(this.camera.quaternion);
 	}
 
+	/** Swap in the current model for `key` if it changed since the slot was filled. */
+	private refresh(slot: ModelSlot, parent: THREE.Object3D, key: AssetKey, opts: InstanceOptions) {
+		const tag = this.assets.tag(key, opts.variant);
+		if (slot.tag === tag) return;
+		slot.model.dispose();
+		slot.model = this.assets.instantiate(key, opts);
+		slot.tag = tag;
+		parent.add(slot.model.object);
+	}
+
 	private fighterView(f: Fighter, isPlayer: boolean): FighterView {
+		// The model follows the weapon, so a swap is visible on the character.
+		const opts: InstanceOptions = { variant: f.build.weapon ?? 'unarmed', color: f.color, glow: true };
 		let v = this.fighters.get(f.id);
-		if (v) return v;
+		if (v) {
+			this.refresh(v, v.spin, 'fighter', opts);
+			v.teamRing.visible = !isPlayer && !v.model.isFallback;
+			return v;
+		}
 		const root = new THREE.Group();
-		const body = new THREE.Mesh(
-			this.geo.capsule,
-			new THREE.MeshStandardMaterial({ color: f.color, roughness: 0.6 })
-		);
-		body.position.y = 0.95;
-		const nose = new THREE.Mesh(this.geo.nose, this.mat.nose);
-		nose.position.set(0, 1.2, -0.6);
+		const model = this.assets.instantiate('fighter', opts);
 		const bubble = new THREE.Mesh(this.geo.bubble, this.mat.bubble);
 		bubble.position.y = 0.95;
+		const teamRing = new THREE.Mesh(
+			this.geo.teamRing,
+			new THREE.MeshBasicMaterial({ color: f.color, transparent: true, opacity: 0.75, depthWrite: false })
+		);
+		teamRing.position.y = 0.04;
+		teamRing.visible = !isPlayer && !model.isFallback;
 		const bar = this.makeBar(1.6, 2.5);
 		if (isPlayer) bar.fill.material = this.mat.barHp;
 		const spin = new THREE.Group();
-		spin.add(body, nose);
-		root.add(spin, bubble, bar.group);
+		spin.add(model.object);
+		root.add(spin, bubble, teamRing, bar.group);
 		this.scene.add(root);
-		v = { root, spin, body, nose, bubble, bar };
+		v = { root, spin, model, tag: this.assets.tag('fighter', opts.variant), bubble, teamRing, bar };
 		this.fighters.set(f.id, v);
 		return v;
 	}
 
+	private removeFighter(v: FighterView) {
+		this.scene.remove(v.root);
+		v.model.dispose();
+		v.teamRing.material.dispose();
+	}
+
 	private monsterView(m: Monster): MonsterView {
+		const key = monsterKey(m);
+		const opts: InstanceOptions = { color: m.passive ? DUMMY_COLOR : undefined, glow: true };
 		let v = this.monsters.get(m.id);
-		if (v) return v;
-		const look = MONSTER_LOOK[m.tier];
+		if (v) {
+			this.refresh(v, v.root, key, opts);
+			return v;
+		}
 		const root = new THREE.Group();
-		const body = new THREE.Mesh(
-			look.geo(),
-			// Training dummies read as straw-coloured and inert.
-			new THREE.MeshStandardMaterial({ color: m.passive ? 0xc9b37e : look.color, roughness: 0.7, flatShading: true })
-		);
-		body.position.y = m.radius + 0.1;
+		const model = this.assets.instantiate(key, opts);
 		const bar = this.makeBar(m.radius * 1.8, m.radius * 2 + 0.6);
-		root.add(body, bar.group);
+		root.add(model.object, bar.group);
 		this.scene.add(root);
-		v = { root, body, bar };
+		// Face the camera until it first moves or picks a target.
+		v = { root, model, tag: this.assets.tag(key), bar, heading: Math.PI };
 		this.monsters.set(m.id, v);
 		return v;
 	}
 
-	private statusGlow(mat: THREE.MeshStandardMaterial, u: Fighter | Monster, hitK: number) {
+	private pickupView(id: number, pos: Vec2, itemId: string): PickupView {
+		const item = getItem(itemId);
+		const opts: InstanceOptions = { color: RARITY_COLOR[item.rarity] };
+		let v = this.pickups.get(id);
+		if (v) {
+			this.refresh(v, v.root, 'pickup', opts);
+			return v;
+		}
+		const root = new THREE.Group();
+		const model = this.assets.instantiate('pickup', opts);
+		const beam = new THREE.Mesh(
+			this.geo.beam,
+			new THREE.MeshBasicMaterial({ color: TAG_INFO[item.tags[0]].color, transparent: true, opacity: 0.35, depthWrite: false })
+		);
+		beam.position.y = 3;
+		root.add(model.object, beam);
+		root.position.copy(toThree(pos));
+		this.scene.add(root);
+		v = { root, model, tag: this.assets.tag('pickup'), beam };
+		this.pickups.set(id, v);
+		return v;
+	}
+
+	private removePickup(v: PickupView) {
+		this.scene.remove(v.root);
+		v.model.dispose();
+		v.beam.material.dispose();
+	}
+
+	private statusGlow(model: ModelInstance, u: Fighter | Monster, hitK: number) {
 		const s = u.status;
-		if (hitK > 0) mat.emissive.setRGB(hitK, hitK, hitK);
-		else if (s.burnTime > 0) mat.emissive.setHex(0x803000);
-		else if (s.bleedStacks > 0) mat.emissive.setHex(0x600010);
-		else mat.emissive.setHex(0x000000);
+		if (hitK > 0) this.glow.setRGB(hitK, hitK, hitK);
+		else if (s.burnTime > 0) this.glow.setHex(0x803000);
+		else if (s.bleedStacks > 0) this.glow.setHex(0x600010);
+		else this.glow.setHex(0x000000);
+		model.setGlow(this.glow);
+	}
+
+	/**
+	 * Keep a unit that just died on screen to play its death clip. Returns false when it didn't
+	 * die (despawned, world switched) or its model has no such clip — the caller removes it then.
+	 */
+	private bury(id: number, root: THREE.Object3D, model: ModelInstance, hide: THREE.Object3D[], remove: () => void): boolean {
+		if (!this.dying.has(id)) return false;
+		const length = model.die();
+		if (length === null) return false;
+		for (const o of hide) o.visible = false;
+		model.setGlow(NO_GLOW);
+		model.object.scale.setScalar(1);
+		this.corpses.push({ root, model, age: 0, hold: length + CORPSE_HOLD, remove });
+		return true;
+	}
+
+	/** An event's unit model, fighter or monster. */
+	private unitModel(id: number): ModelInstance | undefined {
+		return (this.fighters.get(id) ?? this.monsters.get(id))?.model;
 	}
 
 	/** `alpha` interpolates between the previous and current sim tick. */
@@ -346,18 +465,20 @@ export class Renderer {
 			const v = this.fighterView(f, f.id === focusId);
 			const p = lerpPos(f.id, f.pos);
 			v.root.position.copy(toThree(p));
-			v.spin.rotation.y = Math.atan2(-f.facing.x, f.facing.y);
+			v.spin.rotation.y = facingAngle(f.facing.x, f.facing.y);
 			const k = hitK(f.id);
-			this.statusGlow(v.body.material, f, k * 0.6);
-			v.body.scale.set(1, f.dashTime > 0 ? 0.75 : 1, 1);
+			this.statusGlow(v.model, f, k * 0.6);
+			// Primitives squash to read as a dash; models have a clip for it.
+			if (v.model.isFallback) v.model.object.scale.set(1, f.dashTime > 0 ? 0.75 : 1, 1);
+			v.model.setLoop(f.moveDir || f.dashTime > 0 ? 'move' : 'idle');
+			v.model.update(dt);
 			v.bubble.visible = f.shield > 0.5;
 			this.setBar(v.bar, f.hp / f.maxHp, f.shield / f.maxHp);
 			if (f.id === focusId) focusPos = p;
 		}
 		for (const [id, v] of this.fighters) {
 			if (seen.has(id)) continue;
-			this.scene.remove(v.root);
-			v.body.material.dispose();
+			if (!this.bury(id, v.root, v.model, [v.bubble, v.teamRing, v.bar.group], () => this.removeFighter(v))) this.removeFighter(v);
 			this.fighters.delete(id);
 		}
 
@@ -368,41 +489,67 @@ export class Renderer {
 			const v = this.monsterView(m);
 			const p = lerpPos(m.id, m.pos);
 			v.root.position.copy(toThree(p));
+			const was = prev.get(m.id);
+			const moving = was !== undefined && Math.hypot(m.pos.x - was.x, m.pos.y - was.y) > 1e-4;
+			const target = !moving && m.targetId !== null ? world.fighters.find((f) => f.id === m.targetId) : undefined;
+			// Face where it walks, or whoever it's standing still to hit.
+			if (moving) v.heading = facingAngle(m.pos.x - was.x, m.pos.y - was.y);
+			else if (target) v.heading = facingAngle(target.pos.x - m.pos.x, target.pos.y - m.pos.y);
+			const obj = v.model.object;
+			if (v.model.isFallback) {
+				// Floating, spinning gem.
+				obj.rotation.y = this.clock * 0.8 + m.id;
+				obj.position.y = m.radius + 0.1 + Math.sin(this.clock * 3 + m.id) * 0.08;
+			} else {
+				obj.rotation.y = v.heading;
+			}
 			const k = hitK(m.id);
-			v.body.rotation.y = this.clock * 0.8 + m.id;
-			v.body.position.y = m.radius + 0.1 + Math.sin(this.clock * 3 + m.id) * 0.08;
-			v.body.scale.setScalar(1 + k * 0.25);
-			this.statusGlow(v.body.material, m, k * 0.5);
+			obj.scale.setScalar(1 + k * 0.25);
+			this.statusGlow(v.model, m, k * 0.5);
+			v.model.setLoop(moving ? 'move' : 'idle');
+			v.model.update(dt);
 			v.bar.group.visible = m.hp < m.maxHp - 0.01;
 			this.setBar(v.bar, m.hp / m.maxHp, 0);
 		}
 		for (const [id, v] of this.monsters) {
 			if (seen.has(id)) continue;
-			this.scene.remove(v.root);
-			v.body.geometry.dispose();
-			v.body.material.dispose();
+			const remove = () => {
+				this.scene.remove(v.root);
+				v.model.dispose();
+			};
+			if (!this.bury(id, v.root, v.model, [v.bar.group], remove)) remove();
 			this.monsters.delete(id);
 		}
+		this.dying.clear();
+
+		this.corpses = this.corpses.filter((c) => {
+			c.age += dt;
+			c.model.update(dt);
+			const sink = (c.age - c.hold) / CORPSE_SINK;
+			if (sink >= 1) {
+				c.remove();
+				return false;
+			}
+			if (sink > 0) c.root.position.y = -sink * CORPSE_DEPTH;
+			return true;
+		});
 
 		// Projectiles
 		seen.clear();
 		for (const pr of world.projectiles) {
 			seen.add(pr.id);
-			let mesh = this.projectiles.get(pr.id);
-			if (!mesh) {
-				mesh =
-					pr.kind === 'fireball'
-						? new THREE.Mesh(this.geo.fireball, this.mat.fireball)
-						: new THREE.Mesh(this.geo.arrow, this.mat.arrow);
-				this.scene.add(mesh);
-				this.projectiles.set(pr.id, mesh);
+			let model = this.projectiles.get(pr.id);
+			if (!model) {
+				model = this.assets.instantiate(pr.kind);
+				this.scene.add(model.object);
+				this.projectiles.set(pr.id, model);
 			}
-			mesh.position.copy(toThree(lerpPos(pr.id, pr.pos), 1.1));
-			mesh.rotation.y = Math.atan2(-pr.vel.x, pr.vel.y);
+			model.object.position.copy(toThree(lerpPos(pr.id, pr.pos), 1.1));
+			model.object.rotation.y = facingAngle(pr.vel.x, pr.vel.y);
 		}
-		for (const [id, mesh] of this.projectiles) {
+		for (const [id, model] of this.projectiles) {
 			if (seen.has(id)) continue;
-			this.scene.remove(mesh);
+			model.dispose();
 			this.projectiles.delete(id);
 		}
 
@@ -410,33 +557,15 @@ export class Renderer {
 		seen.clear();
 		for (const pk of world.pickups) {
 			seen.add(pk.id);
-			let g = this.pickups.get(pk.id);
-			if (!g) {
-				const item = getItem(pk.itemId);
-				const color = RARITY_COLOR[item.rarity];
-				g = new THREE.Group();
-				const box = new THREE.Mesh(
-					this.geo.pickup,
-					new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5 })
-				);
-				box.position.y = 0.8;
-				const beam = new THREE.Mesh(
-					this.geo.beam,
-					new THREE.MeshBasicMaterial({ color: TAG_INFO[item.tags[0]].color, transparent: true, opacity: 0.35, depthWrite: false })
-				);
-				beam.position.y = 3;
-				g.add(box, beam);
-				g.position.copy(toThree(pk.pos));
-				this.scene.add(g);
-				this.pickups.set(pk.id, g);
-			}
-			g.children[0].rotation.y = this.clock * 1.5;
+			this.pickupView(pk.id, pk.pos, pk.itemId).model.object.rotation.y = this.clock * 1.5;
 		}
-		for (const [id, g] of this.pickups) {
+		for (const [id, v] of this.pickups) {
 			if (seen.has(id)) continue;
-			this.scene.remove(g);
+			this.removePickup(v);
 			this.pickups.delete(id);
 		}
+
+		this.buildProps();
 
 		if (this.goal.visible) {
 			const pulse = 1 + Math.sin(this.clock * 4) * 0.06;
@@ -519,8 +648,10 @@ export class Renderer {
 			switch (e.type) {
 				case 'hit':
 					this.hitAt.set(e.target, this.clock);
+					this.unitModel(e.target)?.trigger('hit');
 					break;
 				case 'attack': {
+					this.unitModel(e.unit)?.trigger('attack');
 					if (e.radius <= 0) break;
 					const start = Math.atan2(e.facing.y, e.facing.x) - e.arc / 2;
 					const color = e.combo === 3 ? 0xffe082 : e.unit === playerId ? 0xffffff : 0xff9e80;
@@ -545,6 +676,7 @@ export class Renderer {
 					break;
 				}
 				case 'dash': {
+					this.unitModel(e.unit)?.trigger('dash');
 					const dx = e.to.x - e.from.x;
 					const dy = e.to.y - e.from.y;
 					const len = Math.hypot(dx, dy);
@@ -553,7 +685,7 @@ export class Renderer {
 						new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.5, depthWrite: false })
 					);
 					mesh.position.copy(toThree({ x: e.from.x + dx / 2, y: e.from.y + dy / 2 }, 0.1));
-					mesh.rotation.y = Math.atan2(-dx, dy);
+					mesh.rotation.y = facingAngle(dx, dy);
 					const mat = mesh.material;
 					this.addFx(mesh, 0.3, (k) => {
 						mat.opacity = 0.5 * (1 - k);
@@ -561,6 +693,7 @@ export class Renderer {
 					break;
 				}
 				case 'death': {
+					this.dying.add(e.unit);
 					const big = e.kind === 'fighter';
 					const mesh = this.groundRing(e.pos, 0.7, 1, big ? 0xffffff : 0xffcc80);
 					const mat = mesh.material as THREE.MeshBasicMaterial;
@@ -592,6 +725,8 @@ export class Renderer {
 	}
 
 	dispose() {
+		this.reset();
+		this.assets.dispose();
 		this.renderer.dispose();
 	}
 }

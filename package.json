@@ -12,10 +12,15 @@
 		"build": "bun run --cwd apps/client build",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"test": "vitest --run",
-		"balance": "bun packages/sim/scripts/balance.ts"
+		"balance": "bun packages/sim/scripts/balance.ts",
+		"assets:characters": "bun apps/client/scripts/build-characters.ts"
 	},
 	"devDependencies": {
+		"@gltf-transform/core": "^4.5.0",
+		"@gltf-transform/extensions": "^4.5.0",
+		"@gltf-transform/functions": "^4.5.0",
 		"@types/node": "^24",
+		"meshoptimizer": "^1.2.0",
 		"typescript": "^6.0.2",
 		"vite": "^8.0.7",
 		"vitest": "^4.1.3"
