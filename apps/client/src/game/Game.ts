@@ -13,10 +13,9 @@ import type { InputGesture } from '../input/types';
 import { Renderer } from '../render/Renderer';
 import { Tutorial } from '../tutorial/Tutorial';
 import { Hud } from '../ui/Hud';
+import { createStages, StageManager, type StageHost } from './stages';
 
 const FIGHTERS = 12;
-
-type Mode = 'menu' | 'match' | 'tutorial';
 
 const randomSeed = () => (Math.random() * 2 ** 31) | 0;
 
@@ -28,17 +27,17 @@ function safeStorage(): Storage | undefined {
 	}
 }
 
-export class Game {
+export class Game implements StageHost {
 	private world: World;
 	private playerId: number | null;
 	private focusId: number | null;
-	private mode: Mode = 'menu';
 	private tutorial: Tutorial | null = null;
 	private readonly renderer: Renderer;
 	private readonly hud: Hud;
 	private input: InputController;
 	private inputOptions: InputThresholdOptions;
 	private readonly keyboard: Keyboard;
+	private readonly stages: StageManager;
 	private pending: Command[] = [];
 	private readonly prev = new Map<number, Vec2>();
 	private acc = 0;
@@ -53,11 +52,12 @@ export class Game {
 		// Loaded before the HUD: the start menu shows the saved preset.
 		this.inputOptions = loadInputThresholdOptions(safeStorage());
 		this.hud = new Hud(hudRoot, this.renderer, {
-			command: (c) => this.pending.push(c),
-			start: () => this.startMatch(),
-			startTutorial: () => this.startTutorial(),
-			toMenu: () => this.toMenu(),
-			restart: () => (this.mode === 'tutorial' ? this.startTutorial() : this.startMatch()),
+			command: (c) => this.queue(c),
+			start: () => this.stages.go('match'),
+			startTutorial: () => this.stages.go('tutorial'),
+			toMenu: () => this.stages.go('menu'),
+			restart: () => this.stages.go(this.stages.id === 'tutorial' ? 'tutorial' : 'match'),
+			spectate: () => this.stages.go('spectate'),
 			spectateNext: () => this.spectateNext(),
 			skipTutorialStep: () => {
 				this.tutorial?.skip();
@@ -73,8 +73,12 @@ export class Game {
 
 		this.input = this.createInput();
 		this.keyboard = new Keyboard(
-			(c) => this.pending.push(c),
-			(k) => this.hud.handleKey(k, this.player())
+			(c) => this.queue(c),
+			(k) => this.stages.uiKey(k)
+		);
+		this.stages = new StageManager(
+			createStages(this, (next) => this.stages.go(next)),
+			'menu'
 		);
 
 		window.addEventListener('resize', this.onResize);
@@ -116,39 +120,67 @@ export class Game {
 		return this.world.fighters.find((f) => f.id === this.playerId);
 	}
 
-	private load(world: World, playerId: number | null, mode: Mode) {
+	/** Player commands only reach the sim in stages that take gameplay input. */
+	private queue(c: Command) {
+		if (this.stages.acceptsInput) this.pending.push(c);
+	}
+
+	private load(world: World, playerId: number | null, tutorial: boolean) {
 		this.world = world;
 		this.playerId = playerId;
 		this.focusId = playerId;
-		this.mode = mode;
 		this.pending = [];
 		this.prev.clear();
 		this.acc = 0;
 		this.renderer.reset();
 		this.hud.reset();
-		this.hud.setMode(mode === 'tutorial' ? 'tutorial' : 'match');
+		this.hud.setMode(tutorial ? 'tutorial' : 'match');
 	}
 
-	private startMatch() {
-		this.tutorial = null;
-		const { world, playerId } = createWorld({ seed: randomSeed(), fighters: FIGHTERS, playerName: '나' });
-		this.load(world, playerId, 'match');
-		this.hud.onMatchStart();
+	// ── StageHost: the stages (./stages.ts) decide when; these do the work.
+
+	playerDown() {
+		return !this.player()?.alive;
 	}
 
-	private startTutorial() {
-		this.tutorial = new Tutorial(randomSeed());
-		this.load(this.tutorial.world, this.tutorial.playerId, 'tutorial');
-		this.onTutorialStep();
+	worldOver() {
+		return this.world.over;
 	}
 
-	private toMenu() {
-		this.tutorial = null;
-		this.mode = 'menu';
-		this.renderer.setMarker(null);
+	hudKey(key: string) {
+		return this.hud.handleKey(key, this.player());
+	}
+
+	showMenu() {
 		this.hud.reset();
 		this.hud.setMode('match');
 		this.hud.showStart();
+	}
+
+	startMatch() {
+		const { world, playerId } = createWorld({ seed: randomSeed(), fighters: FIGHTERS, playerName: '나' });
+		this.load(world, playerId, false);
+		this.hud.onMatchStart();
+	}
+
+	startTutorial() {
+		this.tutorial = new Tutorial(randomSeed());
+		this.load(this.tutorial.world, this.tutorial.playerId, true);
+		this.onTutorialStep();
+	}
+
+	endTutorial() {
+		this.tutorial = null;
+		this.renderer.setMarker(null);
+	}
+
+	showResult() {
+		const me = this.player();
+		if (me) this.hud.showGameOver(this.world, me);
+	}
+
+	showSpectate() {
+		this.hud.showSpectate();
 	}
 
 	/** React to the tutorial entering a new step. */
@@ -202,9 +234,11 @@ export class Game {
 		const dt = Math.min(0.1, (now - this.last) / 1000);
 		this.last = now;
 		this.input.update();
+		this.stages.frame(dt);
+	};
 
-		const running = this.mode !== 'menu';
-		if (running && !this.world.over) {
+	simulate(dt: number) {
+		if (!this.world.over) {
 			this.acc += dt;
 			while (this.acc >= DT) {
 				this.acc -= DT;
@@ -222,12 +256,17 @@ export class Game {
 				if (this.tutorial?.afterStep(this.world.events)) this.onTutorialStep();
 			}
 		}
-		if (this.tutorial) {
-			// Some step text depends on live state (e.g. current weapon).
-			this.hud.updateTutorial(this.tutorial);
-			this.renderer.setMarker(this.tutorial.marker);
-		}
+	}
 
+	syncTutorial() {
+		if (!this.tutorial) return;
+		// Some step text depends on live state (e.g. current weapon).
+		this.hud.updateTutorial(this.tutorial);
+		this.renderer.setMarker(this.tutorial.marker);
+	}
+
+	/** Render the world; with `hud`, also refresh the HUD (the menu backdrop skips it). */
+	present(dt: number, hud: boolean) {
 		// After death, follow whoever is still standing.
 		const me = this.player();
 		let focus = this.world.fighters.find((f) => f.id === this.focusId);
@@ -241,9 +280,9 @@ export class Game {
 			}
 		}
 
-		this.renderer.render(this.world, this.prev, running ? this.acc / DT : 1, this.focusId, dt);
-		this.hud.update(this.world, me, focus, dt);
-	};
+		this.renderer.render(this.world, this.prev, hud ? this.acc / DT : 1, this.focusId, dt);
+		if (hud) this.hud.update(this.world, me, focus, dt);
+	}
 
 	dispose() {
 		cancelAnimationFrame(this.raf);

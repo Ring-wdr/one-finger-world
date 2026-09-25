@@ -29,6 +29,7 @@ export interface HudCallbacks {
 	startTutorial: () => void;
 	toMenu: () => void;
 	restart: () => void;
+	spectate: () => void;
 	spectateNext: () => void;
 	skipTutorialStep: () => void;
 	buildOpened: () => void;
@@ -114,8 +115,6 @@ export class Hud {
 	private buildKey = '';
 	private tagKey = '';
 	private minimapTimer = 0;
-	private gameOverShown = false;
-	private spectating = false;
 	private seenHints = loadSeenHints();
 	private hintQueue: { id: string; text: string }[] = [];
 	private hintShowing: string | null = null;
@@ -164,7 +163,7 @@ export class Hud {
 		this.el.levelBtn.addEventListener('click', () => this.toggleDraft());
 		this.el.buildBtn.addEventListener('click', () => this.toggleBuild());
 		this.el.hint.addEventListener('click', () => this.dismissHint());
-		this.showStart();
+		// The start screen is shown by the menu stage's enter().
 	}
 
 	// ── Overlays
@@ -224,8 +223,6 @@ export class Hud {
 	}
 
 	reset() {
-		this.gameOverShown = false;
-		this.spectating = false;
 		this.draftOpen = false;
 		this.buildOpen = false;
 		this.draftKey = '';
@@ -333,8 +330,10 @@ export class Hud {
 		this.hintTimer = HINT_SECONDS;
 	}
 
-	private showGameOver(world: World, me: Fighter) {
-		this.gameOverShown = true;
+	/** Result panel. Which screen is up is decided by the stages (game/stages.ts), not here. */
+	showGameOver(world: World, me: Fighter) {
+		this.toggleDraft(false);
+		this.toggleBuild(false);
 		const won = world.winner === me.id;
 		const o = this.el.overlay;
 		o.className = 'overlay show';
@@ -355,13 +354,15 @@ export class Hud {
 			</div>`;
 		o.querySelector('[data-act=restart]')!.addEventListener('click', () => this.cb.restart());
 		o.querySelector('[data-act=menu]')!.addEventListener('click', () => this.cb.toMenu());
-		o.querySelector('[data-act=spectate]')?.addEventListener('click', () => {
-			this.spectating = true;
-			o.className = 'overlay spectate';
-			o.innerHTML = `<div class="spectate-bar"><span>관전 중</span><button class="btn" data-act="next">다음</button><button class="btn primary" data-act="restart">다시 하기</button></div>`;
-			o.querySelector('[data-act=next]')!.addEventListener('click', () => this.cb.spectateNext());
-			o.querySelector('[data-act=restart]')!.addEventListener('click', () => this.cb.restart());
-		});
+		o.querySelector('[data-act=spectate]')?.addEventListener('click', () => this.cb.spectate());
+	}
+
+	showSpectate() {
+		const o = this.el.overlay;
+		o.className = 'overlay spectate';
+		o.innerHTML = `<div class="spectate-bar"><span>관전 중</span><button class="btn" data-act="next">다음</button><button class="btn primary" data-act="restart">다시 하기</button></div>`;
+		o.querySelector('[data-act=next]')!.addEventListener('click', () => this.cb.spectateNext());
+		o.querySelector('[data-act=restart]')!.addEventListener('click', () => this.cb.restart());
 	}
 
 	// ── Draft & build sheets
@@ -582,14 +583,6 @@ export class Hud {
 		if (this.minimapTimer <= 0) {
 			this.minimapTimer = 0.2;
 			this.drawMinimap(world, focus ?? me);
-		}
-
-		if (this.mode === 'tutorial') return;
-		if (!me.alive && !this.gameOverShown) this.showGameOver(world, me);
-		else if (world.over && !this.gameOverShown) this.showGameOver(world, me);
-		else if (world.over && this.spectating) {
-			this.spectating = false;
-			this.showGameOver(world, me);
 		}
 	}
 
