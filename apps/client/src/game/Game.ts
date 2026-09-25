@@ -1,33 +1,27 @@
-import { createWorld, DT, step, type Command, type Fighter, type Vec2, type World } from '@ofa/sim';
+import { effect } from '@preact/signals';
+import { createWorld, DT, step, TAGS, type Command, type Fighter, type GameEvent, type Vec2, type World } from '@ofa/sim';
+import { profile, result, settings, stage, tutorialDone, type GameActions } from '../app/store';
+import { Sfx, type SfxId } from '../audio/Sfx';
 import { InputController } from '../input/InputController';
-import {
-	INPUT_THRESHOLD_PRESETS,
-	inputThresholdOptionsToThresholds,
-	loadInputThresholdOptions,
-	saveInputThresholdOptions,
-	type InputThresholdOptions,
-	type InputThresholdPresetId
-} from '../input/inputThresholdOptions';
+import { inputThresholdOptionsToThresholds, type InputThresholdOptions } from '../input/inputThresholdOptions';
 import { Keyboard } from '../input/Keyboard';
 import type { InputGesture } from '../input/types';
+import { equippedRunes, grantReward } from '../meta/profile';
+import { scoreMatch, type MatchReward } from '../meta/rewards';
+import { sfxGain } from '../meta/settings';
 import { Renderer } from '../render/Renderer';
 import { Tutorial } from '../tutorial/Tutorial';
 import { Hud } from '../ui/Hud';
-import { createStages, StageManager, type StageHost } from './stages';
+import { createStages, StageManager, type StageHost, type StageId } from './stages';
 
 const FIGHTERS = 12;
 
 const randomSeed = () => (Math.random() * 2 ** 31) | 0;
 
-function safeStorage(): Storage | undefined {
-	try {
-		return window.localStorage;
-	} catch {
-		return undefined;
-	}
-}
+const sameInput = (a: InputThresholdOptions, b: InputThresholdOptions) =>
+	a.tapMs === b.tapMs && a.dragStartPx === b.dragStartPx && a.fastDragPxPerMs === b.fastDragPxPerMs;
 
-export class Game implements StageHost {
+export class Game implements StageHost, GameActions {
 	private world: World;
 	private playerId: number | null;
 	private focusId: number | null;
@@ -38,6 +32,10 @@ export class Game implements StageHost {
 	private inputOptions: InputThresholdOptions;
 	private readonly keyboard: Keyboard;
 	private readonly stages: StageManager;
+	private readonly sfx = new Sfx();
+	private readonly disposeSettings: () => void;
+	/** The current match already paid out (the result panel is shown again after spectating). */
+	private rewarded = false;
 	private pending: Command[] = [];
 	private readonly prev = new Map<number, Vec2>();
 	private acc = 0;
@@ -49,23 +47,15 @@ export class Game implements StageHost {
 		hudRoot: HTMLElement
 	) {
 		this.renderer = new Renderer(canvas);
-		// Loaded before the HUD: the start menu shows the saved preset.
-		this.inputOptions = loadInputThresholdOptions(safeStorage());
+		this.inputOptions = settings.value.input;
 		this.hud = new Hud(hudRoot, this.renderer, {
 			command: (c) => this.queue(c),
-			start: () => this.stages.go('match'),
-			startTutorial: () => this.stages.go('tutorial'),
-			toMenu: () => this.stages.go('menu'),
-			restart: () => this.stages.go(this.stages.id === 'tutorial' ? 'tutorial' : 'match'),
-			spectate: () => this.stages.go('spectate'),
-			spectateNext: () => this.spectateNext(),
+			toMenu: () => this.go('menu'),
 			skipTutorialStep: () => {
 				this.tutorial?.skip();
 				this.onTutorialStep();
 			},
-			buildOpened: () => this.tutorial?.signal('buildOpened'),
-			setInputPreset: (id) => this.applyInputOptions({ ...INPUT_THRESHOLD_PRESETS[id].values }),
-			inputPreset: () => this.currentPreset()
+			buildOpened: () => this.tutorial?.signal('buildOpened')
 		});
 		// A match world idles behind the menu as a backdrop.
 		({ world: this.world, playerId: this.playerId } = createWorld({ seed: randomSeed(), fighters: FIGHTERS, playerName: '나' }));
@@ -76,10 +66,19 @@ export class Game implements StageHost {
 			(c) => this.queue(c),
 			(k) => this.stages.uiKey(k)
 		);
-		this.stages = new StageManager(
-			createStages(this, (next) => this.stages.go(next)),
-			'menu'
-		);
+		this.stages = new StageManager(createStages(this, (next) => this.go(next)), 'menu');
+		stage.value = this.stages.id;
+
+		// Settings screen → live audio level and touch thresholds.
+		this.disposeSettings = effect(() => {
+			const s = settings.value;
+			this.sfx.setVolume(sfxGain(s));
+			if (!sameInput(s.input, this.inputOptions)) {
+				this.inputOptions = s.input;
+				this.input.dispose();
+				this.input = this.createInput();
+			}
+		});
 
 		window.addEventListener('resize', this.onResize);
 		this.onResize();
@@ -98,22 +97,29 @@ export class Game implements StageHost {
 		);
 	}
 
-	private applyInputOptions(options: InputThresholdOptions) {
-		this.inputOptions = options;
-		saveInputThresholdOptions(safeStorage(), options);
-		this.input.dispose();
-		this.input = this.createInput();
+	// ── GameActions: what the preact screens (../ui/screens) can ask for.
+
+	go(next: StageId) {
+		if (this.stages.go(next)) stage.value = next;
 	}
 
-	private currentPreset(): InputThresholdPresetId | null {
-		const o = this.inputOptions;
-		const ids = Object.keys(INPUT_THRESHOLD_PRESETS) as InputThresholdPresetId[];
-		return (
-			ids.find((id) => {
-				const v = INPUT_THRESHOLD_PRESETS[id].values;
-				return v.tapMs === o.tapMs && v.dragStartPx === o.dragStartPx && v.fastDragPxPerMs === o.fastDragPxPerMs;
-			}) ?? null
-		);
+	restart() {
+		this.go(this.stages.id === 'tutorial' ? 'tutorial' : 'match');
+	}
+
+	spectateNext() {
+		const alive = this.world.fighters.filter((f) => f.alive);
+		if (alive.length === 0) return;
+		const i = alive.findIndex((f) => f.id === this.focusId);
+		this.focusId = alive[(i + 1) % alive.length].id;
+	}
+
+	resetHints() {
+		this.hud.resetHints();
+	}
+
+	click() {
+		this.sfx.play('ui');
 	}
 
 	private player(): Fighter | undefined {
@@ -154,16 +160,25 @@ export class Game implements StageHost {
 	showMenu() {
 		this.hud.reset();
 		this.hud.setMode('match');
-		this.hud.showStart();
+		result.value = null;
+		tutorialDone.value = false;
 	}
 
 	startMatch() {
-		const { world, playerId } = createWorld({ seed: randomSeed(), fighters: FIGHTERS, playerName: '나' });
+		const { world, playerId } = createWorld({
+			seed: randomSeed(),
+			fighters: FIGHTERS,
+			playerName: '나',
+			playerRunes: equippedRunes(profile.value)
+		});
 		this.load(world, playerId, false);
+		this.rewarded = false;
+		result.value = null;
 		this.hud.onMatchStart();
 	}
 
 	startTutorial() {
+		tutorialDone.value = false;
 		this.tutorial = new Tutorial(randomSeed());
 		this.load(this.tutorial.world, this.tutorial.playerId, true);
 		this.onTutorialStep();
@@ -171,16 +186,48 @@ export class Game implements StageHost {
 
 	endTutorial() {
 		this.tutorial = null;
+		tutorialDone.value = false;
 		this.renderer.setMarker(null);
 	}
 
 	showResult() {
 		const me = this.player();
-		if (me) this.hud.showGameOver(this.world, me);
+		if (!me) return;
+		this.hud.closeSheets();
+		const w = this.world;
+		const won = w.winner === me.id;
+		const placement = won ? 1 : (me.placement ?? w.fighters.filter((f) => f.alive).length);
+		let reward: MatchReward | null = null;
+		let newBest = false;
+		if (!this.rewarded) {
+			this.rewarded = true;
+			reward = scoreMatch({ placement, fighters: w.fighters.length, kills: me.kills, level: me.level, time: w.time });
+			newBest = reward.score > profile.value.best;
+			profile.value = grantReward(profile.value, reward.coins, reward.score);
+			this.sfx.play(won ? 'win' : 'lose');
+		}
+		const prev = result.value;
+		result.value = {
+			won,
+			placement,
+			level: me.level,
+			kills: me.kills,
+			time: w.time,
+			tags: TAGS.filter((t) => me.build.tagCounts[t] > 0).map((t) => ({
+				tag: t,
+				count: me.build.tagCounts[t],
+				on: me.build.tiers[t] > 0
+			})),
+			items: [...me.items],
+			// Coming back from spectating keeps showing the payout from the first time.
+			reward: reward ?? prev?.reward ?? null,
+			newBest: newBest || (prev?.newBest ?? false),
+			canSpectate: !w.over
+		};
 	}
 
 	showSpectate() {
-		this.hud.showSpectate();
+		this.hud.closeSheets();
 	}
 
 	/** React to the tutorial entering a new step. */
@@ -190,7 +237,8 @@ export class Game implements StageHost {
 		this.renderer.setMarker(t.marker);
 		this.hud.updateTutorial(t);
 		if (t.finished) {
-			this.hud.showTutorialDone();
+			this.hud.closeSheets();
+			tutorialDone.value = true;
 			return;
 		}
 		if (t.wantsDraft) this.hud.toggleDraft(true);
@@ -222,13 +270,6 @@ export class Game implements StageHost {
 		this.renderer.resize(w, h);
 	};
 
-	private spectateNext() {
-		const alive = this.world.fighters.filter((f) => f.alive);
-		if (alive.length === 0) return;
-		const i = alive.findIndex((f) => f.id === this.focusId);
-		this.focusId = alive[(i + 1) % alive.length].id;
-	}
-
 	private readonly frame = (now: number) => {
 		this.raf = requestAnimationFrame(this.frame);
 		const dt = Math.min(0.1, (now - this.last) / 1000);
@@ -251,11 +292,51 @@ export class Game implements StageHost {
 				if (this.playerId !== null) cmds.set(this.playerId, this.pending);
 				this.pending = [];
 				step(this.world, cmds);
+				this.playSounds(this.world.events);
 				this.renderer.handleEvents(this.world.events, this.playerId);
 				this.hud.handleEvents(this.world, this.world.events, this.playerId);
 				if (this.tutorial?.afterStep(this.world.events)) this.onTutorialStep();
 			}
 		}
+	}
+
+	/** Sound (and a short buzz when hurt) only for what happens to or by the local player. */
+	private playSounds(events: readonly GameEvent[]) {
+		const me = this.playerId;
+		if (me === null) return;
+		let hurt = false;
+		for (const e of events) {
+			let id: SfxId | null = null;
+			switch (e.type) {
+				case 'attack':
+					if (e.unit === me) id = 'swing';
+					break;
+				case 'hit':
+					if (e.src === me && e.target !== me) id = e.crit ? 'crit' : 'hit';
+					else if (e.target === me && e.amount >= 1) {
+						id = 'hurt';
+						hurt = true;
+					}
+					break;
+				case 'dash':
+					if (e.unit === me) id = 'dash';
+					break;
+				case 'levelUp':
+					if (e.unit === me) id = 'levelUp';
+					break;
+				case 'synergy':
+					if (e.unit === me) id = 'synergy';
+					break;
+				case 'pickup':
+					if (e.unit === me) id = 'pickup';
+					break;
+				case 'death':
+					if (e.kind === 'fighter' && e.killer === me) id = 'kill';
+					break;
+			}
+			if (id) this.sfx.play(id);
+		}
+		if (hurt && settings.value.vibrate) navigator.vibrate?.(30);
 	}
 
 	syncTutorial() {
@@ -286,6 +367,8 @@ export class Game implements StageHost {
 
 	dispose() {
 		cancelAnimationFrame(this.raf);
+		this.disposeSettings();
+		this.sfx.dispose();
 		this.input.dispose();
 		this.keyboard.dispose();
 		window.removeEventListener('resize', this.onResize);
