@@ -8,7 +8,7 @@ import * as THREE from 'three';
 
 /** Half-width of the shadowed square around the focus. Wide enough for portrait zoom-out. */
 const SHADOW_HALF = 40;
-const SHADOW_MAP = 2048;
+const SHADOW_MAP = 1024;
 /** Sun direction (from the focus toward the sun): low and from the upper right. */
 const SUN_OFFSET = new THREE.Vector3(34, 52, 18);
 
