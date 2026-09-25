@@ -1,5 +1,13 @@
 import { createWorld, DT, step, type Command, type Fighter, type Vec2, type World } from '@ofa/sim';
 import { InputController } from '../input/InputController';
+import {
+	INPUT_THRESHOLD_PRESETS,
+	inputThresholdOptionsToThresholds,
+	loadInputThresholdOptions,
+	saveInputThresholdOptions,
+	type InputThresholdOptions,
+	type InputThresholdPresetId
+} from '../input/inputThresholdOptions';
 import { Keyboard } from '../input/Keyboard';
 import type { InputGesture } from '../input/types';
 import { Renderer } from '../render/Renderer';
@@ -12,6 +20,14 @@ type Mode = 'menu' | 'match' | 'tutorial';
 
 const randomSeed = () => (Math.random() * 2 ** 31) | 0;
 
+function safeStorage(): Storage | undefined {
+	try {
+		return window.localStorage;
+	} catch {
+		return undefined;
+	}
+}
+
 export class Game {
 	private world: World;
 	private playerId: number | null;
@@ -20,7 +36,8 @@ export class Game {
 	private tutorial: Tutorial | null = null;
 	private readonly renderer: Renderer;
 	private readonly hud: Hud;
-	private readonly input: InputController;
+	private input: InputController;
+	private inputOptions: InputThresholdOptions;
 	private readonly keyboard: Keyboard;
 	private pending: Command[] = [];
 	private readonly prev = new Map<number, Vec2>();
@@ -33,6 +50,8 @@ export class Game {
 		hudRoot: HTMLElement
 	) {
 		this.renderer = new Renderer(canvas);
+		// Loaded before the HUD: the start menu shows the saved preset.
+		this.inputOptions = loadInputThresholdOptions(safeStorage());
 		this.hud = new Hud(hudRoot, this.renderer, {
 			command: (c) => this.pending.push(c),
 			start: () => this.startMatch(),
@@ -44,13 +63,15 @@ export class Game {
 				this.tutorial?.skip();
 				this.onTutorialStep();
 			},
-			buildOpened: () => this.tutorial?.signal('buildOpened')
+			buildOpened: () => this.tutorial?.signal('buildOpened'),
+			setInputPreset: (id) => this.applyInputOptions({ ...INPUT_THRESHOLD_PRESETS[id].values }),
+			inputPreset: () => this.currentPreset()
 		});
 		// A match world idles behind the menu as a backdrop.
 		({ world: this.world, playerId: this.playerId } = createWorld({ seed: randomSeed(), fighters: FIGHTERS, playerName: '나' }));
 		this.focusId = this.playerId;
 
-		this.input = new InputController(canvas, this.onGesture, undefined, (e) => this.hud.inputFeedback(e));
+		this.input = this.createInput();
 		this.keyboard = new Keyboard(
 			(c) => this.pending.push(c),
 			(k) => this.hud.handleKey(k, this.player())
@@ -60,6 +81,35 @@ export class Game {
 		this.onResize();
 		this.last = performance.now();
 		this.raf = requestAnimationFrame(this.frame);
+	}
+
+	private createInput() {
+		return new InputController(
+			this.canvas,
+			this.onGesture,
+			inputThresholdOptionsToThresholds(this.inputOptions),
+			(e) => this.hud.inputFeedback(e),
+			// Skills auto-cast in the royale, so the diagonal skill buttons stay off.
+			{ skillButtons: false }
+		);
+	}
+
+	private applyInputOptions(options: InputThresholdOptions) {
+		this.inputOptions = options;
+		saveInputThresholdOptions(safeStorage(), options);
+		this.input.dispose();
+		this.input = this.createInput();
+	}
+
+	private currentPreset(): InputThresholdPresetId | null {
+		const o = this.inputOptions;
+		const ids = Object.keys(INPUT_THRESHOLD_PRESETS) as InputThresholdPresetId[];
+		return (
+			ids.find((id) => {
+				const v = INPUT_THRESHOLD_PRESETS[id].values;
+				return v.tapMs === o.tapMs && v.dragStartPx === o.dragStartPx && v.fastDragPxPerMs === o.fastDragPxPerMs;
+			}) ?? null
+		);
 	}
 
 	private player(): Fighter | undefined {
@@ -128,6 +178,9 @@ export class Game {
 			case 'dash':
 				this.pending.push({ type: 'dash', dir: g.direction });
 				break;
+			case 'skill':
+				// Disabled via options; skills auto-cast in the sim.
+				break;
 		}
 	};
 
@@ -148,7 +201,7 @@ export class Game {
 		this.raf = requestAnimationFrame(this.frame);
 		const dt = Math.min(0.1, (now - this.last) / 1000);
 		this.last = now;
-		this.input.update(now);
+		this.input.update();
 
 		const running = this.mode !== 'menu';
 		if (running && !this.world.over) {

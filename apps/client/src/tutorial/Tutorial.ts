@@ -58,7 +58,7 @@ const STEPS: StepDef[] = [
 	{
 		id: 'run',
 		title: '달리기',
-		text: () => '손가락을 멀리 끌거나 오래 누르고 있으면 달리기로 바뀝니다 (조이스틱이 노랗게 변해요). 원 쪽으로 달려 보세요.',
+		text: () => '손가락을 멀리 끌면 달리기로 바뀝니다 (조이스틱이 노랗게 변해요). 원 쪽으로 달려 보세요.',
 		enter: (t) => t.setMarker({ x: 14, y: 0 }),
 		tick: (t) => {
 			if (t.me.running && t.me.moveDir) t.runTime += 1 / 20;

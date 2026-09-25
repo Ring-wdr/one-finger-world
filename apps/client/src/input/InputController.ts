@@ -5,7 +5,9 @@ import type {
 	InputFeedbackHandler,
 	InputGesture,
 	MoveMode,
-	ScreenPoint
+	ScreenPoint,
+	SkillButtonFeedback,
+	SkillSlot
 } from './types';
 
 export interface PointerSurface {
@@ -15,10 +17,9 @@ export interface PointerSurface {
 	releasePointerCapture?(pointerId: number): void;
 }
 
-interface InputThresholds {
+export interface InputThresholds {
 	tapMs: number;
 	dragStartPx: number;
-	runHoldMs: number;
 	runDistancePx: number;
 	fastDragPxPerMs: number;
 	dashWindowMs: number;
@@ -27,11 +28,24 @@ interface InputThresholds {
 const DEFAULT_THRESHOLDS: InputThresholds = {
 	tapMs: 180,
 	dragStartPx: 14,
-	runHoldMs: 450,
 	runDistancePx: 72,
 	fastDragPxPerMs: 0.9,
 	dashWindowMs: 320
 };
+
+const SKILL_BUTTON_DISTANCE_PX = 112;
+const SKILL_BUTTON_RADIUS_PX = 24;
+const SKILL_BUTTON_DIRECTIONS: Record<SkillSlot, Direction2> = {
+	1: { x: 1, y: -1 },
+	2: { x: -1, y: -1 },
+	3: { x: 1, y: 1 },
+	4: { x: -1, y: 1 }
+};
+
+export interface InputControllerOptions {
+	/** Show the four diagonal skill buttons on press. Defaults to true. */
+	skillButtons?: boolean;
+}
 
 interface ActivePointer {
 	pointerId: number;
@@ -44,6 +58,9 @@ interface ActivePointer {
 	dragging: boolean;
 	lastDirection: Direction2;
 	lastMode: MoveMode | null;
+	skillButtons: SkillButtonFeedback[];
+	triggeredSkillSlots: Set<SkillSlot>;
+	skillButtonsVisible: boolean;
 }
 
 export class InputController {
@@ -56,7 +73,8 @@ export class InputController {
 		private readonly target: PointerSurface,
 		private readonly emit: (gesture: InputGesture) => void,
 		private readonly thresholds: InputThresholds = DEFAULT_THRESHOLDS,
-		private readonly emitFeedback: InputFeedbackHandler = () => undefined
+		private readonly emitFeedback: InputFeedbackHandler = () => undefined,
+		private readonly options: InputControllerOptions = {}
 	) {
 		this.target.addEventListener('pointerdown', this.handlePointerDown);
 		this.target.addEventListener('pointermove', this.handlePointerMove);
@@ -65,10 +83,10 @@ export class InputController {
 		this.target.addEventListener('lostpointercapture', this.handleLostPointerCapture);
 	}
 
-	update(now: number) {
+	update() {
 		if (!this.active?.dragging || this.disposed) return;
 
-		const nextMode = this.getMoveMode(this.active, now);
+		const nextMode = this.getMoveMode(this.active);
 		if (nextMode !== this.active.lastMode) {
 			this.active.lastMode = nextMode;
 			this.emit({ type: 'move', mode: nextMode, direction: this.active.lastDirection });
@@ -104,7 +122,10 @@ export class InputController {
 			dragStartTime: null,
 			dragging: false,
 			lastDirection: { x: 0, y: 1 },
-			lastMode: null
+			lastMode: null,
+			skillButtons: this.createSkillButtons(event.clientX, event.clientY),
+			triggeredSkillSlots: new Set<SkillSlot>(),
+			skillButtonsVisible: this.options.skillButtons !== false
 		};
 
 		this.target.setPointerCapture?.(event.pointerId);
@@ -114,6 +135,13 @@ export class InputController {
 			thumb: this.pointFromEvent(event),
 			timeStamp: event.timeStamp
 		});
+		if (this.active.skillButtonsVisible) {
+			this.safeEmitFeedback({
+				type: 'skill-buttons',
+				buttons: this.active.skillButtons,
+				timeStamp: event.timeStamp
+			});
+		}
 	};
 
 	private readonly handlePointerMove = (event: PointerEvent) => {
@@ -133,7 +161,7 @@ export class InputController {
 		if (!active.dragging) return;
 
 		active.lastDirection = this.directionFromStart(active);
-		const mode = this.getMoveMode(active, event.timeStamp);
+		const mode = this.getMoveMode(active);
 		this.safeEmitFeedback({
 			type: 'drag',
 			start: this.startPoint(active),
@@ -144,6 +172,7 @@ export class InputController {
 		});
 		active.lastMode = mode;
 		this.emit({ type: 'move', mode, direction: active.lastDirection });
+		this.emitSkillIfNeeded(active, event.timeStamp);
 	};
 
 	private readonly handlePointerUp = (event: PointerEvent) => {
@@ -171,6 +200,7 @@ export class InputController {
 		};
 
 		if (!active.dragging) {
+			this.hideSkillButtons(active, event.timeStamp);
 			this.releaseActivePointer();
 			this.safeEmitFeedback(releaseFeedback);
 			this.active = null;
@@ -186,12 +216,15 @@ export class InputController {
 		}
 
 		const direction = this.directionFromStart(active);
-		const speed = distance / Math.max(1, duration);
+		const dragDuration = event.timeStamp - (active.dragStartTime ?? active.startTime);
+		const speed = distance / Math.max(1, dragDuration);
+		const triggeredSkill = active.triggeredSkillSlots.size > 0;
+		this.hideSkillButtons(active, event.timeStamp);
 		this.releaseActivePointer();
 		this.safeEmitFeedback(releaseFeedback);
 		this.active = null;
 
-		if (speed >= this.thresholds.fastDragPxPerMs) {
+		if (!triggeredSkill && speed >= this.thresholds.fastDragPxPerMs) {
 			if (
 				this.lastFastDragTime !== null &&
 				event.timeStamp - this.lastFastDragTime <= this.thresholds.dashWindowMs
@@ -221,6 +254,7 @@ export class InputController {
 			wasDragging: active.dragging,
 			timeStamp: event.timeStamp
 		});
+		this.hideSkillButtons(active, event.timeStamp);
 		this.releaseActivePointer();
 		this.active = null;
 		this.emit({ type: 'idle' });
@@ -240,6 +274,7 @@ export class InputController {
 			wasDragging: active.dragging,
 			timeStamp: event.timeStamp
 		});
+		this.hideSkillButtons(active, event.timeStamp);
 		this.releaseActivePointer();
 		this.active = null;
 		this.emit({ type: 'idle' });
@@ -278,6 +313,51 @@ export class InputController {
 		}
 	}
 
+	private hideSkillButtons(active: ActivePointer, timeStamp: number) {
+		if (!active.skillButtonsVisible) return;
+
+		active.skillButtonsVisible = false;
+		this.safeEmitFeedback({
+			type: 'skill-buttons-hidden',
+			timeStamp
+		});
+	}
+
+	private createSkillButtons(startX: number, startY: number): SkillButtonFeedback[] {
+		return ([1, 2, 3, 4] as SkillSlot[]).map((slot) => {
+			const direction = SKILL_BUTTON_DIRECTIONS[slot];
+			return {
+				slot,
+				center: {
+					x: startX + direction.x * SKILL_BUTTON_DISTANCE_PX,
+					y: startY + direction.y * SKILL_BUTTON_DISTANCE_PX
+				},
+				radius: SKILL_BUTTON_RADIUS_PX
+			};
+		});
+	}
+
+	private emitSkillIfNeeded(active: ActivePointer, timeStamp: number) {
+		if (!active.skillButtonsVisible) return;
+
+		for (const button of active.skillButtons) {
+			if (active.triggeredSkillSlots.has(button.slot)) continue;
+			if (!this.isThumbInsideSkillButton(active, button)) continue;
+
+			active.triggeredSkillSlots.add(button.slot);
+			this.hideSkillButtons(active, timeStamp);
+			this.emit({ type: 'skill', slot: button.slot });
+			return;
+		}
+	}
+
+	private isThumbInsideSkillButton(active: ActivePointer, button: SkillButtonFeedback) {
+		return (
+			Math.hypot(active.currentX - button.center.x, active.currentY - button.center.y) <=
+			button.radius
+		);
+	}
+
 	private distanceFromStart(active: ActivePointer) {
 		return Math.hypot(active.currentX - active.startX, active.currentY - active.startY);
 	}
@@ -292,13 +372,11 @@ export class InputController {
 		return normalizeSignedZero({ x: dx / length, y: -dy / length });
 	}
 
-	private getMoveMode(active: ActivePointer, now: number): MoveMode {
+	private getMoveMode(active: ActivePointer): MoveMode {
 		const distance = this.distanceFromStart(active);
-		const dragStartTime = active.dragStartTime ?? active.startTime;
-		const heldLongEnough = now - dragStartTime >= this.thresholds.runHoldMs;
 		const draggedFarEnough = distance >= this.thresholds.runDistancePx;
 
-		return heldLongEnough || draggedFarEnough ? 'run' : 'walk';
+		return draggedFarEnough ? 'run' : 'walk';
 	}
 }
 

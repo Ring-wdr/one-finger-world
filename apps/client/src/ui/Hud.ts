@@ -20,6 +20,7 @@ import {
 	dist
 } from '@ofa/sim';
 import type { InputFeedbackEvent } from '../input/types';
+import { INPUT_THRESHOLD_PRESETS, type InputThresholdPresetId } from '../input/inputThresholdOptions';
 import type { Renderer } from '../render/Renderer';
 
 export interface HudCallbacks {
@@ -31,6 +32,8 @@ export interface HudCallbacks {
 	spectateNext: () => void;
 	skipTutorialStep: () => void;
 	buildOpened: () => void;
+	setInputPreset: (id: InputThresholdPresetId) => void;
+	inputPreset: () => InputThresholdPresetId | null;
 }
 
 /** What the HUD needs from the tutorial director (kept structural to avoid a dependency). */
@@ -176,7 +179,7 @@ export class Hud {
 				<ul class="howto">
 					<li><b>시작 무기</b>로 근접/원거리가 정해집니다. 드래프트의 무기 카드로 교체 가능</li>
 					<li><b>탭</b> 공격 (자동 조준 · 3연타)</li>
-					<li><b>드래그</b> 이동 · 멀리/오래 끌면 달리기</li>
+					<li><b>드래그</b> 이동 · 멀리 끌면 달리기</li>
 					<li><b>빠르게 두 번 스와이프</b> 대시 (무적)</li>
 					<li><b>레벨업</b> 버튼으로 3장 중 1장 선택 — 같은 태그 3·5개에서 시너지 발동</li>
 					<li>외곽은 안전·저효율, 중앙은 위험·고효율. 자기장은 따로 줄어듭니다.</li>
@@ -186,8 +189,23 @@ export class Hud {
 					<button class="btn big" data-act="tutorial">📘 튜토리얼<small>조작·빌드 단계별 연습 (약 3분)</small></button>
 					<button class="btn big primary" data-act="start">⚔ 본 게임<small>봇 11명과 배틀로얄</small></button>
 				</div>
+				<div class="row presets">
+					<span>입력 감도</span>
+					${(Object.keys(INPUT_THRESHOLD_PRESETS) as InputThresholdPresetId[])
+						.map(
+							(id) =>
+								`<button class="btn tiny ${this.cb.inputPreset() === id ? 'on' : ''}" data-preset="${id}">${INPUT_THRESHOLD_PRESETS[id].label}</button>`
+						)
+						.join('')}
+				</div>
 				<button class="btn tiny ghost" data-act="hints">본 게임 도움말 힌트 다시 보기</button>
 			</div>`;
+		o.querySelectorAll<HTMLElement>('[data-preset]').forEach((el) =>
+			el.addEventListener('click', () => {
+				this.cb.setInputPreset(el.dataset.preset as InputThresholdPresetId);
+				o.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('on', b === el));
+			})
+		);
 		o.querySelector('[data-act=start]')!.addEventListener('click', () => {
 			o.className = 'overlay';
 			this.cb.start();
@@ -720,6 +738,8 @@ export class Hud {
 
 	/** Floating joystick under the thumb, from the InputController's feedback stream. */
 	inputFeedback(e: InputFeedbackEvent) {
+		// Skill buttons are disabled in this mode (skills auto-cast), so there is nothing to draw.
+		if (e.type === 'skill-buttons' || e.type === 'skill-buttons-hidden') return;
 		const joy = this.el.joy;
 		const knob = this.el.knob;
 		if (e.type === 'release' || e.type === 'cancel') {

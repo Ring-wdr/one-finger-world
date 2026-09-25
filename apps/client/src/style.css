@@ -658,6 +658,17 @@ body {
 	font-weight: 400;
 	opacity: 0.75;
 }
+.row.presets {
+	justify-content: center;
+	margin-top: 12px;
+	font-size: 13px;
+	color: var(--muted);
+}
+.btn.tiny.on {
+	background: var(--gold);
+	color: #1a1a1a;
+	border-color: transparent;
+}
 .btn.ghost {
 	background: none;
 	border: none;
