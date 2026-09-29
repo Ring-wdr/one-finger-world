@@ -33,6 +33,12 @@ export interface ResultInfo {
 	reward: MatchReward | null;
 	newBest: boolean;
 	canSpectate: boolean;
+	/** Which kind of match this was; "다시 하기" follows it. */
+	mode: 'local' | 'online';
+	/** Online only: the payout is queued and shows up with the next profile load. */
+	rewardPending: boolean;
+	/** A local match under the server profile: no coins (the client cannot be trusted). */
+	practice: boolean;
 }
 
 export const stage = signal<StageId>('menu');
@@ -43,9 +49,13 @@ export const tutorialDone = signal(false);
 const storage = safeStorage();
 export const settings = signal<Settings>(loadSettings(storage));
 export const profile = signal<Profile>(loadProfile(storage));
+/** Where `profile` comes from; the server one must never overwrite the offline save. */
+export const profileSource = signal<'local' | 'server'>('local');
 
 effect(() => saveSettings(storage, settings.value));
-effect(() => saveProfile(storage, profile.value));
+effect(() => {
+	if (profileSource.value === 'local') saveProfile(storage, profile.value);
+});
 
 /** What the screens can ask the game to do. */
 export interface GameActions {

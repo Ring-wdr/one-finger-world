@@ -1,4 +1,5 @@
 import { getRune, RUNE_SLOT_INFO, RUNE_SLOTS } from '@ofa/sim';
+import { onlineAvailable, playerName } from '../../app/online';
 import { sfx } from '../../app/sound';
 import { menuView, profile, type GameActions, type MenuView } from '../../app/store';
 import { Coins } from './common';
@@ -14,15 +15,29 @@ export function MainMenu({ game }: { game: GameActions }) {
 			<div class="panel menu-panel">
 				<div class="menu-top">
 					<Coins />
+					{onlineAvailable.value && <span class="player-name">{playerName.value}</span>}
 					{p.best > 0 && <span class="best">최고 점수 {p.best.toLocaleString()}</span>}
 				</div>
 				<h1>One Finger Royale</h1>
 				<p class="sub">한 손가락 3D 육성 배틀로얄 · 봇 11명</p>
 
-				<button class="btn big primary play" onClick={() => game.go('match')}>
-					⚔ 본 게임
-					<small>순위·처치·레벨에 따라 코인 획득</small>
-				</button>
+				{onlineAvailable.value ? (
+					<>
+						<button class="btn big primary play" onClick={() => game.go('queue')}>
+							⚔ 온라인 매치
+							<small>전 세계 플레이어와 12인 배틀로얄 · 빈자리는 봇</small>
+						</button>
+						<button class="btn big" onClick={() => game.go('match')}>
+							🤖 연습 매치
+							<small>봇 11명과 연습 · 코인 없음</small>
+						</button>
+					</>
+				) : (
+					<button class="btn big primary play" onClick={() => game.go('match')}>
+						⚔ 본 게임
+						<small>순위·처치·레벨에 따라 코인 획득</small>
+					</button>
+				)}
 				<div class="loadout" onClick={() => open('shop')}>
 					{RUNE_SLOTS.map((slot) => {
 						const id = p.equipped[slot];

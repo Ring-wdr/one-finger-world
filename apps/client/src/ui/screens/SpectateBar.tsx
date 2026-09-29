@@ -8,7 +8,7 @@ export function SpectateBar({ game }: { game: GameActions }) {
 				<button class="btn" onClick={() => game.spectateNext()}>
 					다음
 				</button>
-				<button class="btn primary" onClick={() => game.go('match')}>
+				<button class="btn primary" onClick={() => game.restart()}>
 					다시 하기
 				</button>
 			</div>

@@ -1,6 +1,7 @@
 import { effect } from '@preact/signals';
 import { createWorld, DT, step, TAGS, type Command, type Fighter, type GameEvent, type Vec2, type World } from '@ofa/sim';
-import { profile, result, settings, stage, tutorialDone, type GameActions } from '../app/store';
+import { connection, getApi, lobby, lobbyAt, netStats, onlineError, onlineErrorCode, queueErrorText } from '../app/online';
+import { profile, profileSource, result, settings, stage, tutorialDone, type GameActions } from '../app/store';
 import { sfx } from '../app/sound';
 import type { SfxId } from '../audio/Sfx';
 import { InputController } from '../input/InputController';
@@ -8,12 +9,17 @@ import { inputThresholdOptionsToThresholds, type InputThresholdOptions } from '.
 import { Keyboard } from '../input/Keyboard';
 import type { InputGesture } from '../input/types';
 import { equippedRunes, grantReward, scoreMatch, type MatchReward } from '@ofa/meta';
+import type { ResultMessage } from '@ofa/net';
+import { OnlineMatch, type ViewFrame } from '../net/onlineMatch';
 import { Renderer } from '../render/Renderer';
 import { Tutorial } from '../tutorial/Tutorial';
 import { Hud } from '../ui/Hud';
 import { createStages, StageManager, type StageHost, type StageId } from './stages';
 
 const FIGHTERS = 12;
+/** `?net=1` shows the netcode overlay; it refreshes about 4 times a second. */
+const NET_DEBUG = new URLSearchParams(location.search).has('net');
+const NET_DEBUG_MS = 250;
 
 const randomSeed = () => (Math.random() * 2 ** 31) | 0;
 
@@ -34,6 +40,16 @@ export class Game implements StageHost, GameActions {
 	private readonly disposeSettings: () => void;
 	/** The current match already paid out (the result panel is shown again after spectating). */
 	private rewarded = false;
+	/** Set while queueing or in an online match; the local sim then only serves as a menu backdrop. */
+	private online: OnlineMatch | null = null;
+	private lastFrame: ViewFrame | null = null;
+	/** The own fighter as last seen in a view; the online result reads it after it left the snapshots. */
+	private lastMe: Fighter | null = null;
+	private selfDied = false;
+	private provisionalPlacement: number | null = null;
+	private onlineResult: ResultMessage | null = null;
+	private onlineWinner: number | null = null;
+	private lastNetStats = 0;
 	private pending: Command[] = [];
 	private readonly prev = new Map<number, Vec2>();
 	private acc = 0;
@@ -103,10 +119,17 @@ export class Game implements StageHost, GameActions {
 	}
 
 	restart() {
-		this.go(this.stages.id === 'tutorial' ? 'tutorial' : 'match');
+		const id = this.stages.id;
+		// In the queue, "retry" after an error: the stage stays, the matchmaking starts over.
+		if (id === 'queue') this.startQueue();
+		else this.go(id === 'tutorial' ? 'tutorial' : this.online ? 'queue' : 'match');
 	}
 
 	spectateNext() {
+		if (this.online) {
+			this.online.spectateNext();
+			return;
+		}
 		const alive = this.world.fighters.filter((f) => f.alive);
 		if (alive.length === 0) return;
 		const i = alive.findIndex((f) => f.id === this.focusId);
@@ -124,10 +147,16 @@ export class Game implements StageHost, GameActions {
 
 	/** Player commands only reach the sim in stages that take gameplay input. */
 	private queue(c: Command) {
-		if (this.stages.acceptsInput) this.pending.push(c);
+		if (this.stages.acceptsInput) this.dispatch(c);
+	}
+
+	private dispatch(c: Command) {
+		if (this.online) this.online.command(c);
+		else this.pending.push(c);
 	}
 
 	private load(world: World, playerId: number | null, tutorial: boolean) {
+		this.endOnline();
 		this.world = world;
 		this.playerId = playerId;
 		this.focusId = playerId;
@@ -142,11 +171,11 @@ export class Game implements StageHost, GameActions {
 	// ── StageHost: the stages (./stages.ts) decide when; these do the work.
 
 	playerDown() {
-		return !this.player()?.alive;
+		return this.online ? this.selfDied : !this.player()?.alive;
 	}
 
 	worldOver() {
-		return this.world.over;
+		return this.online ? this.online.phase === 'ended' : this.world.over;
 	}
 
 	hudKey(key: string) {
@@ -154,6 +183,7 @@ export class Game implements StageHost, GameActions {
 	}
 
 	showMenu() {
+		this.endOnline();
 		this.hud.reset();
 		this.hud.setMode('match');
 		result.value = null;
@@ -186,20 +216,150 @@ export class Game implements StageHost, GameActions {
 		this.renderer.setMarker(null);
 	}
 
+	startQueue() {
+		this.endOnline();
+		this.resetOnlineState();
+		const roster = (id: number) => this.lastFrame?.world.roster.get(id)?.name ?? '';
+		const online = new OnlineMatch(getApi(), {
+			onLobby: (l) => {
+				lobby.value = l;
+				lobbyAt.value = performance.now();
+			},
+			onStart: () => this.go('online'),
+			onEvents: (events) => {
+				const me = online.selfId;
+				this.playSounds(events, me);
+				this.renderer.handleEvents(events, me);
+				this.hud.handleEvents(this.lastFrame?.world ?? this.world, events, me, roster);
+			},
+			onSelfDied: () => {
+				this.selfDied = true;
+				this.provisionalPlacement = (this.lastFrame?.world.aliveTotal ?? 0) + 1;
+			},
+			onResult: (r) => this.onOnlineResult(r),
+			onEnd: (winner) => {
+				this.onlineWinner = winner;
+			},
+			onConnection: (state) => {
+				connection.value = state;
+			},
+			onError: (code) => {
+				onlineErrorCode.value = code;
+				onlineError.value = queueErrorText(code);
+				connection.value = null;
+				// The socket is gone for good; an ongoing match can only go on to its result screen.
+				if (this.stages.id === 'online') this.selfDied = true;
+			}
+		});
+		this.online = online;
+		void online.start();
+	}
+
+	cancelQueue() {
+		this.endOnline();
+	}
+
+	enterOnline() {
+		this.resetOnlineState();
+		this.rewarded = false;
+		this.renderer.reset();
+		this.hud.reset();
+		this.hud.setMode('match');
+		result.value = null;
+		this.hud.onMatchStart();
+	}
+
+	/** Leave (a running match still counts as left) and drop the connection; back to the local backdrop. */
+	private endOnline() {
+		const online = this.online;
+		if (!online) return;
+		this.online = null;
+		if (online.phase === 'running') online.leave();
+		online.dispose();
+		this.resetOnlineState();
+		this.renderer.reset();
+	}
+
+	private resetOnlineState() {
+		lobby.value = null;
+		connection.value = null;
+		onlineError.value = null;
+		onlineErrorCode.value = null;
+		netStats.value = null;
+		this.lastFrame = null;
+		this.lastMe = null;
+		this.selfDied = false;
+		this.provisionalPlacement = null;
+		this.onlineResult = null;
+		this.onlineWinner = null;
+	}
+
+	private onOnlineResult(r: ResultMessage) {
+		this.onlineResult = r;
+		if (r.coins !== null) profile.value = { ...profile.value, coins: r.coins, best: r.best ?? profile.value.best };
+		const cur = result.value;
+		if (cur?.mode !== 'online') return;
+		result.value = { ...cur, placement: r.placement, won: r.placement === 1, reward: r.reward, newBest: r.newBest, rewardPending: r.rewardPending };
+	}
+
+	private showOnlineResult() {
+		const online = this.online;
+		const me = this.lastMe;
+		if (!online || !me) return;
+		const r = this.onlineResult;
+		const won = r ? r.placement === 1 : this.onlineWinner === online.selfId;
+		const placement = r?.placement ?? (won ? 1 : (this.provisionalPlacement ?? (this.lastFrame?.world.aliveTotal ?? 0) + 1));
+		if (!this.rewarded) {
+			this.rewarded = true;
+			sfx.play(won ? 'win' : 'lose');
+		}
+		result.value = {
+			won,
+			placement,
+			level: me.level,
+			kills: me.kills,
+			time: r?.time ?? this.lastFrame?.world.time ?? 0,
+			tags: this.tagSummary(me),
+			items: [...me.items],
+			reward: r?.reward ?? null,
+			newBest: r?.newBest ?? false,
+			canSpectate: online.phase === 'running',
+			mode: 'online',
+			rewardPending: r?.rewardPending ?? false,
+			practice: false
+		};
+	}
+
+	private tagSummary(me: Fighter) {
+		return TAGS.filter((t) => me.build.tagCounts[t] > 0).map((t) => ({
+			tag: t,
+			count: me.build.tagCounts[t],
+			on: me.build.tiers[t] > 0
+		}));
+	}
+
 	showResult() {
+		this.hud.closeSheets();
+		if (this.online) {
+			this.showOnlineResult();
+			return;
+		}
 		const me = this.player();
 		if (!me) return;
-		this.hud.closeSheets();
 		const w = this.world;
 		const won = w.winner === me.id;
 		const placement = won ? 1 : (me.placement ?? w.fighters.filter((f) => f.alive).length);
 		let reward: MatchReward | null = null;
 		let newBest = false;
+		// A server profile must not be topped up by a match the server never saw.
+		const practice = profileSource.value === 'server';
 		if (!this.rewarded) {
 			this.rewarded = true;
-			reward = scoreMatch({ placement, fighters: w.fighters.length, kills: me.kills, level: me.level, time: w.time });
-			newBest = reward.score > profile.value.best;
-			profile.value = grantReward(profile.value, reward.coins, reward.score);
+			if (!practice) {
+				reward = scoreMatch({ placement, fighters: w.fighters.length, kills: me.kills, level: me.level, time: w.time });
+				newBest = reward.score > profile.value.best;
+				profile.value = grantReward(profile.value, reward.coins, reward.score);
+			}
 			sfx.play(won ? 'win' : 'lose');
 		}
 		const prev = result.value;
@@ -209,16 +369,15 @@ export class Game implements StageHost, GameActions {
 			level: me.level,
 			kills: me.kills,
 			time: w.time,
-			tags: TAGS.filter((t) => me.build.tagCounts[t] > 0).map((t) => ({
-				tag: t,
-				count: me.build.tagCounts[t],
-				on: me.build.tiers[t] > 0
-			})),
+			tags: this.tagSummary(me),
 			items: [...me.items],
 			// Coming back from spectating keeps showing the payout from the first time.
 			reward: reward ?? prev?.reward ?? null,
 			newBest: newBest || (prev?.newBest ?? false),
-			canSpectate: !w.over
+			canSpectate: !w.over,
+			mode: 'local',
+			rewardPending: false,
+			practice
 		};
 	}
 
@@ -243,16 +402,16 @@ export class Game implements StageHost, GameActions {
 	private readonly onGesture = (g: InputGesture) => {
 		switch (g.type) {
 			case 'move':
-				this.pending.push({ type: 'move', dir: g.direction, run: g.mode === 'run' });
+				this.dispatch({ type: 'move', dir: g.direction, run: g.mode === 'run' });
 				break;
 			case 'idle':
-				this.pending.push({ type: 'move', dir: null, run: false });
+				this.dispatch({ type: 'move', dir: null, run: false });
 				break;
 			case 'attack':
-				this.pending.push({ type: 'attack' });
+				this.dispatch({ type: 'attack' });
 				break;
 			case 'dash':
-				this.pending.push({ type: 'dash', dir: g.direction, touch: g.touch === true });
+				this.dispatch({ type: 'dash', dir: g.direction, touch: g.touch === true });
 				break;
 			case 'skill':
 				// Disabled via options; skills auto-cast in the sim.
@@ -274,7 +433,9 @@ export class Game implements StageHost, GameActions {
 		this.stages.frame(dt);
 	};
 
+	/** Online, the OnlineMatch runs its own ticks; only the local sim is stepped here. */
 	simulate(dt: number) {
+		if (this.online) return;
 		if (!this.world.over) {
 			this.acc += dt;
 			while (this.acc >= DT) {
@@ -288,7 +449,7 @@ export class Game implements StageHost, GameActions {
 				if (this.playerId !== null) cmds.set(this.playerId, this.pending);
 				this.pending = [];
 				step(this.world, cmds);
-				this.playSounds(this.world.events);
+				this.playSounds(this.world.events, this.playerId);
 				this.renderer.handleEvents(this.world.events, this.playerId);
 				this.hud.handleEvents(this.world, this.world.events, this.playerId);
 				if (this.tutorial?.afterStep(this.world.events)) this.onTutorialStep();
@@ -297,8 +458,7 @@ export class Game implements StageHost, GameActions {
 	}
 
 	/** Sound (and a short buzz when hurt) only for what happens to or by the local player. */
-	private playSounds(events: readonly GameEvent[]) {
-		const me = this.playerId;
+	private playSounds(events: readonly GameEvent[], me: number | null) {
 		if (me === null) return;
 		let hurt = false;
 		for (const e of events) {
@@ -344,6 +504,19 @@ export class Game implements StageHost, GameActions {
 
 	/** Render the world; with `hud`, also refresh the HUD (the menu backdrop skips it). */
 	present(dt: number, hud: boolean) {
+		if (this.online) {
+			const f = this.online.frame(performance.now());
+			if (f) {
+				this.lastFrame = f;
+				if (f.me) this.lastMe = f.me;
+				this.renderer.render(f.world, f.prev, f.alpha, f.focusId, dt);
+				if (hud) this.hud.update(f.world, f.me, f.focus, dt);
+				if (NET_DEBUG) this.publishNetStats();
+				return;
+			}
+			// No snapshot yet: keep the local backdrop, without the match HUD.
+			hud = false;
+		}
 		// After death, follow whoever is still standing.
 		const me = this.player();
 		let focus = this.world.fighters.find((f) => f.id === this.focusId);
@@ -361,7 +534,15 @@ export class Game implements StageHost, GameActions {
 		if (hud) this.hud.update(this.world, me, focus, dt);
 	}
 
+	private publishNetStats() {
+		const now = performance.now();
+		if (now - this.lastNetStats < NET_DEBUG_MS) return;
+		this.lastNetStats = now;
+		netStats.value = this.online?.netStats() ?? null;
+	}
+
 	dispose() {
+		this.online?.dispose();
 		cancelAnimationFrame(this.raf);
 		this.disposeSettings();
 		this.input.dispose();

@@ -410,7 +410,9 @@ export class Hud {
 					: `자기장 ${Math.ceil(z.timer)}s`
 		);
 		e.zone.classList.toggle('warn', z.shrinking);
-		setText(e.alive, `생존 ${world.fighters.filter((f) => f.alive).length}`);
+		// Online views only carry the fighters near the camera; the server sends the true count.
+		const aliveTotal = (world as { aliveTotal?: number }).aliveTotal;
+		setText(e.alive, `생존 ${aliveTotal ?? world.fighters.filter((f) => f.alive).length}`);
 
 		const pending = me.pendingDrafts;
 		e.levelBtn.classList.toggle('pulse', pending > 0 && !this.draftOpen);
@@ -501,8 +503,10 @@ export class Hud {
 
 	// ── Events
 
-	handleEvents(world: World, events: readonly GameEvent[], playerId: number | null) {
-		const nameOf = (id: number | null) => world.fighters.find((f) => f.id === id)?.name ?? '';
+	/** `lookup` resolves names of fighters outside the view (online); the local world has them all. */
+	handleEvents(world: World, events: readonly GameEvent[], playerId: number | null, lookup?: (id: number) => string) {
+		const nameOf = (id: number | null) =>
+			id === null ? '' : (world.fighters.find((f) => f.id === id)?.name ?? lookup?.(id) ?? '');
 		for (const e of events) {
 			switch (e.type) {
 				case 'hit':

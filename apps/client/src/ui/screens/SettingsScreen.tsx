@@ -1,4 +1,6 @@
 import { useState } from 'preact/hooks';
+import { normalizeNickname } from '@ofa/meta';
+import { onlineAvailable, playerName, renameOnline, requestBusy } from '../../app/online';
 import { sfx } from '../../app/sound';
 import { menuView, settings } from '../../app/store';
 import {
@@ -28,6 +30,39 @@ function presetOf(o: InputThresholdOptions): InputThresholdPresetId | null {
 	);
 }
 
+function NicknameSection() {
+	const [name, setName] = useState(playerName.value);
+	const [message, setMessage] = useState<string | null>(null);
+	const save = async () => {
+		const clean = normalizeNickname(name);
+		if (clean === null) {
+			setMessage('닉네임은 2~12자 한글·영문·숫자·_-·공백');
+			return;
+		}
+		const error = await renameOnline(clean);
+		if (error === null) setName(clean);
+		setMessage(error ?? '저장했어요');
+	};
+	return (
+		<section class="card-box">
+			<h3>닉네임</h3>
+			<div class="row wrap">
+				<input
+					class="text-input"
+					type="text"
+					value={name}
+					maxLength={16}
+					onInput={(e) => setName(e.currentTarget.value)}
+				/>
+				<button class="btn" disabled={requestBusy.value} onClick={() => void save()}>
+					저장
+				</button>
+			</div>
+			{message && <p class="muted">{message}</p>}
+		</section>
+	);
+}
+
 export function SettingsScreen() {
 	const s = settings.value;
 	const [hintsReset, setHintsReset] = useState(false);
@@ -37,6 +72,7 @@ export function SettingsScreen() {
 
 	return (
 		<Page title="설정" onBack={() => (menuView.value = 'home')}>
+			{onlineAvailable.value && <NicknameSection />}
 			<section class="card-box">
 				<h3>사운드</h3>
 				<label class="field">

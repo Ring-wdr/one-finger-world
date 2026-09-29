@@ -4,7 +4,7 @@ export function LoadingScreen({ state }: { state: LoadingState }) {
 	return (
 		<div class="screen center dim">
 			<div class="panel loading-panel">
-				<h1>{state.next === 'tutorial' ? '📘 튜토리얼' : '⚔ 본 게임'}</h1>
+				<h1>{state.next === 'tutorial' ? '📘 튜토리얼' : state.next === 'queue' ? '⚔ 온라인 매치' : '⚔ 본 게임'}</h1>
 				{state.error ? (
 					<>
 						<p class="sub">{state.error}</p>

@@ -18,6 +18,10 @@ export function ResultPanel({ game, info }: { game: GameActions; info: ResultInf
 				</div>
 				<p class="items">{info.items.map((id) => getItem(id).name).join(', ') || '없음'}</p>
 
+				{info.practice && <p class="muted">연습 매치는 코인이 지급되지 않아요.</p>}
+				{info.mode === 'online' && !r && (
+					<p class="muted">{info.rewardPending ? '보상은 곧 반영돼요' : '보상 집계 중…'}</p>
+				)}
 				{r && (
 					<div class="reward">
 						<ul>
@@ -38,6 +42,7 @@ export function ResultPanel({ game, info }: { game: GameActions; info: ResultInf
 						<div class="muted">
 							보유 <Coins />
 						</div>
+						{info.rewardPending && <div class="muted">보상은 곧 반영돼요</div>}
 					</div>
 				)}
 
