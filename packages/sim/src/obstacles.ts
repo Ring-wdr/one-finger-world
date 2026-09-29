@@ -35,17 +35,17 @@ export interface Obstacle {
 
 /**
  * Model variants per kind, in the renderer's order, with each model's ground footprint
- * (farthest vertex from the pivot in the ground plane, at scale 1 after the manifest's own
- * model scale). Measured from `models/props/nature.glb`.
+ * (farthest vertex from the pivot in the ground plane, at scale 1) in `models/props/nature.glb`.
+ * The Blender builder (apps/client/blender) fits each rock to exactly this footprint, and
+ * `bun run assets:props` refuses to write a rock that disagrees.
  */
 export const PROP_VARIANTS: Record<PropKind, readonly { name: string; footprint: number }[]> = {
-	// rock_* × manifest scale 5
 	rock: [
-		{ name: 'a', footprint: 0.157 * 5 },
-		{ name: 'b', footprint: 0.157 * 5 },
-		{ name: 'c', footprint: 0.187 * 5 },
-		{ name: 'd', footprint: 0.156 * 5 },
-		{ name: 'e', footprint: 0.26 * 5 }
+		{ name: 'a', footprint: 0.785 },
+		{ name: 'b', footprint: 0.785 },
+		{ name: 'c', footprint: 0.935 },
+		{ name: 'd', footprint: 0.78 },
+		{ name: 'e', footprint: 1.3 }
 	],
 	// Trees collide on their trunk only; the canopy overhangs.
 	tree: [
