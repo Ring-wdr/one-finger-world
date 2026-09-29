@@ -1,0 +1,14 @@
+{
+	"name": "@ofa/net",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Client/server contract: HTTP API types, WebSocket protocol codecs, interest management, client prediction and interpolation. Runtime-agnostic.",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@ofa/meta": "workspace:*",
+		"@ofa/sim": "workspace:*"
+	}
+}

@@ -9,13 +9,21 @@
 	],
 	"scripts": {
 		"dev": "bun run --cwd apps/client dev",
+		"dev:server": "bun run --cwd apps/server dev",
+		"dev:online": "bun scripts/dev-online.ts",
 		"build": "bun run --cwd apps/client build",
-		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"deploy": "bun run build && bun run --cwd apps/server deploy",
+		"db:migrate:local": "bun run --cwd apps/server db:migrate:local",
+		"db:migrate:remote": "bun run --cwd apps/server db:migrate:remote",
+		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json && bun run --cwd apps/server types --check",
 		"test": "vitest --run",
+		"test:unit": "vitest --run --project unit",
+		"test:workers": "vitest --run --project workers",
 		"balance": "bun packages/sim/scripts/balance.ts",
+		"profile": "bun packages/sim/scripts/profile.ts",
+		"loadtest": "bun apps/server/scripts/loadtest.ts",
 		"assets:characters": "bun apps/client/scripts/build-characters.ts",
-		"assets:props": "bun apps/client/scripts/build-props.ts",
-		"profile": "bun packages/sim/scripts/profile.ts"
+		"assets:props": "bun apps/client/scripts/build-props.ts"
 	},
 	"devDependencies": {
 		"@gltf-transform/core": "^4.5.0",

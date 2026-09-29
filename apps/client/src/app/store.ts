@@ -1,8 +1,8 @@
 import { effect, signal } from '@preact/signals';
+import type { MatchReward, Profile } from '@ofa/meta';
 import type { Tag } from '@ofa/sim';
 import type { StageId } from '../game/stages';
-import { loadProfile, saveProfile, type Profile } from '../meta/profile';
-import type { MatchReward } from '../meta/rewards';
+import { loadProfile, saveProfile } from '../meta/profile';
 import { loadSettings, saveSettings, type Settings } from '../meta/settings';
 
 /**

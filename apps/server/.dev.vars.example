@@ -1,0 +1,2 @@
+# Copy to .dev.vars (git-ignored) for `wrangler dev`. Production uses `wrangler secret put AUTH_SECRET`.
+AUTH_SECRET=local-dev-only-secret-change-me-0123456789abcdef

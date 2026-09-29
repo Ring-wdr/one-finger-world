@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { RUNE_SLOT_INFO, RUNE_SLOTS, RUNES, type RuneDef } from '@ofa/sim';
 import { sfx } from '../../app/sound';
 import { menuView, profile } from '../../app/store';
-import { buyRune, toggleRune } from '../../meta/profile';
+import { buyRune, toggleRune } from '@ofa/meta';
 import { modText, Page } from './common';
 
 function runeEffect(r: RuneDef) {

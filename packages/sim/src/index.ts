@@ -23,7 +23,20 @@ export {
 	type PropKind
 } from './obstacles';
 export { type NavState } from './nav';
-export { xpToNext, gainXp, DASH_TIME, DASH_DISTANCE, DASH_COOLDOWN, COMBO_WINDOW } from './combat';
+export {
+	xpToNext,
+	gainXp,
+	dashCooldownFor,
+	DASH_TIME,
+	DASH_DISTANCE,
+	DASH_COOLDOWN,
+	DASH_CD_FLOOR,
+	TOUCH_DASH_CD_SCALE,
+	ATTACK_ROOT_TIME,
+	HASTE_ATTACK_MULT,
+	DASH_HASTE_TIME,
+	COMBO_WINDOW
+} from './combat';
 export { MONSTER_TIERS, spawnMonster, type SpawnMonsterOptions } from './monsters';
 export { powerScore } from './bot';
 export {
@@ -34,6 +47,9 @@ export {
 	spawnFighter,
 	equip,
 	START_REROLLS,
+	ATTACK_BUFFER_TIME,
+	WALK_SPEED_FACTOR,
 	type WorldOptions,
 	type SpawnFighterOptions
 } from './world';
+export { checkpointWorld, restoreWorld, type WorldCheckpoint } from './checkpoint';

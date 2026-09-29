@@ -24,6 +24,12 @@ export const DASH_COOLDOWN = 3;
 export const TOUCH_DASH_CD_SCALE = 0.65;
 /** No build or input gets dashes (and their i-frames) closer together than this. */
 export const DASH_CD_FLOOR = 0.7;
+/** A basic attack roots its user this long. */
+export const ATTACK_ROOT_TIME = 0.12;
+/** Attack speed multiplier while hasted. */
+export const HASTE_ATTACK_MULT = 1.4;
+/** Haste granted when a dash ends with speed tier II. */
+export const DASH_HASTE_TIME = 2;
 export const COMBO_MULT = [1, 1.1, 1.6] as const;
 export const COMBO_WINDOW = 1.1;
 const MELEE_ARC = 2.4;
@@ -275,9 +281,14 @@ function explode(world: World, src: Fighter, at: Vec2, radius: number, amount: n
 
 // ── Fighter actions
 
-export function dashCooldown(f: Fighter, touch: boolean) {
-	const cd = DASH_COOLDOWN * (f.build.tiers.speed >= 1 ? 0.6 : 1) * (1 - f.build.stats.cdr);
+/** Dash cooldown from the parts of a build that set it; client movement prediction uses it too. */
+export function dashCooldownFor(speedTier: number, cdr: number, touch: boolean) {
+	const cd = DASH_COOLDOWN * (speedTier >= 1 ? 0.6 : 1) * (1 - cdr);
 	return Math.max(DASH_CD_FLOOR, cd * (touch ? TOUCH_DASH_CD_SCALE : 1));
+}
+
+export function dashCooldown(f: Fighter, touch: boolean) {
+	return dashCooldownFor(f.build.tiers.speed, f.build.stats.cdr, touch);
 }
 
 export function startDash(world: World, f: Fighter, dir: Vec2, touch = false) {
@@ -311,7 +322,7 @@ export function updateDash(world: World, f: Fighter) {
 		}
 	}
 	f.dashTime -= DT;
-	if (f.dashTime <= 0 && f.build.tiers.speed >= 2) f.hasteBuff = 2;
+	if (f.dashTime <= 0 && f.build.tiers.speed >= 2) f.hasteBuff = DASH_HASTE_TIME;
 }
 
 export function performAttack(world: World, f: Fighter) {
@@ -351,9 +362,9 @@ export function performAttack(world: World, f: Fighter) {
 		world.events.push({ type: 'attack', unit: f.id, pos: copy(f.pos), facing: copy(f.facing), radius, arc, combo: f.combo });
 	}
 
-	f.attackCd = 1 / (s.attackRate * (f.hasteBuff > 0 ? 1.4 : 1));
+	f.attackCd = 1 / (s.attackRate * (f.hasteBuff > 0 ? HASTE_ATTACK_MULT : 1));
 	f.attackQueued = 0;
-	f.rootTime = 0.12;
+	f.rootTime = ATTACK_ROOT_TIME;
 }
 
 export function spawnProjectile(

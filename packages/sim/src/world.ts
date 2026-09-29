@@ -43,6 +43,10 @@ const COLORS = [
 ];
 
 export const START_REROLLS = 2;
+/** An attack command stays queued this long, so a tap during a cooldown still lands. */
+export const ATTACK_BUFFER_TIME = 0.25;
+/** Walking (a short drag) moves at this fraction of the run speed. */
+export const WALK_SPEED_FACTOR = 0.55;
 /** Out-of-combat recovery: lets players reset between fights without potions. */
 const OOC_DELAY = 5;
 const OOC_REGEN_FRAC = 0.04;
@@ -192,7 +196,7 @@ export function applyCommand(world: World, f: Fighter, cmd: Command) {
 			f.running = cmd.run;
 			return;
 		case 'attack':
-			f.attackQueued = 0.25;
+			f.attackQueued = ATTACK_BUFFER_TIME;
 			return;
 		case 'dash':
 			startDash(world, f, cmd.dir, cmd.touch === true);
@@ -265,7 +269,7 @@ function updateFighter(world: World, f: Fighter) {
 		updateDash(world, f);
 	} else {
 		if (f.moveDir && f.rootTime <= 0) {
-			const speed = s.moveSpeed * (f.running ? 1 : 0.55);
+			const speed = s.moveSpeed * (f.running ? 1 : WALK_SPEED_FACTOR);
 			// Everyone (the player too) slides along obstacles; only AI steers around them.
 			f.pos = moveWithCollision(f.pos, scale(f.moveDir, speed * DT), f.radius);
 			f.facing = copy(f.moveDir);
