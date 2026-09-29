@@ -49,7 +49,8 @@ export function emptyFrame(seq: number): InputFrame {
  * vector so both ends normalize the same numbers.
  */
 export function quantizeDir(d: Vec2): Vec2 {
-	const q = (v: number) => Math.round(Math.max(-1, Math.min(1, v)) * DIR_SCALE);
+	// `|| 0` turns Math.round's -0 into the 0 the server decodes, so both ends hold the same bits.
+	const q = (v: number) => Math.round(Math.max(-1, Math.min(1, v)) * DIR_SCALE) || 0;
 	return { x: q(d.x) / DIR_SCALE, y: q(d.y) / DIR_SCALE };
 }
 

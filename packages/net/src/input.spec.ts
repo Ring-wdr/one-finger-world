@@ -31,7 +31,9 @@ describe('input codec', () => {
 			{ x: 0, y: -1 },
 			{ x: Math.SQRT1_2, y: Math.SQRT1_2 },
 			{ x: -Math.SQRT1_2, y: Math.SQRT1_2 },
-			{ x: 1 / 127, y: -1 / 127 }
+			{ x: 1 / 127, y: -1 / 127 },
+			// Rounds to -0 before the fix; the server only ever decodes +0.
+			{ x: -0.001, y: 1 }
 		].map(quantizeDir);
 		for (const d of dirs) {
 			const f = { ...emptyFrame(1), move: d, dash: d, dashTouch: true };
@@ -41,11 +43,7 @@ describe('input codec', () => {
 
 	it('round-trips random flag combinations', () => {
 		const rnd = lcg(7);
-		// quantizeDir can yield -0, which toEqual distinguishes from the decoded 0.
-		const dir = () => {
-			const q = quantizeDir({ x: rnd() * 2 - 1, y: rnd() * 2 - 1 });
-			return { x: q.x + 0, y: q.y + 0 };
-		};
+		const dir = () => quantizeDir({ x: rnd() * 2 - 1, y: rnd() * 2 - 1 });
 		for (let i = 0; i < 500; i++) {
 			const move = rnd() < 0.5 ? dir() : null;
 			const f: InputFrame = {
@@ -145,5 +143,13 @@ describe('one-shots', () => {
 		mergeOneShots(into, { ...emptyFrame(1), move: { x: 1, y: 0 }, attack: true });
 		expect(into.move).toEqual({ x: 0, y: 1 });
 		expect(into.run).toBe(true);
+	});
+});
+
+describe('quantizeDir', () => {
+	it('never returns -0, matching what the server decodes', () => {
+		const q = quantizeDir({ x: -0.001, y: -0.002 });
+		expect(Object.is(q.x, -0)).toBe(false);
+		expect(Object.is(q.y, -0)).toBe(false);
 	});
 });
