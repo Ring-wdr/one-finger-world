@@ -14,3 +14,6 @@ Thumbs.db
 
 # Vite
 vite.config.ts.timestamp-*
+
+# Blender imports the builder modules
+__pycache__/

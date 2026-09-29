@@ -1,102 +1,133 @@
 /**
- * Bundles static props into .glb files, one named node per prop, from KayKit packs
- * (CC0, Kay Lousberg):
+ * Builds the static prop models (rocks, pines, dead trees, loot, arrow) procedurally in Blender
+ * from the scripts in `apps/client/blender`, then compresses them into one .glb per bundle:
  *
- *   bun run assets:props <dir> [<dir> …]
+ *   bun run assets:props [--only nature|items] [--preview <dir>] [--blend <file.blend>]
  *
- * Each dir is a folder holding source .gltf / .gltf.glb files (with their .bin and texture).
- * A bundle whose sources aren't all found is skipped.
- *   nature.glb
- *     Medieval Hexagon: https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0
- *                       (addons/kaykit_medieval_hexagon_pack/Assets/gltf/decoration/nature)
- *     Halloween Bits:   https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0
- *                       (addons/kaykit_halloween_bits/Assets/gltf)
- *   items.glb
- *     Adventurers:      https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0
- *                       (addons/kaykit_character_pack_adventures/Assets/gltf)
- *     Dungeon:          https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0
- *                       (addons/kaykit_dungeon_remastered/Assets/gltf)
+ * Blender 4.2+ is found on the usual install paths, or set BLENDER to its executable.
+ *   --only     rebuilds one bundle, leaving the other as it is
+ *   --preview  renders contact sheets of every prop at the game's camera angle
+ *   --blend    saves the generated scene, to open and tweak in Blender
  *
- * One file keeps each pack's texture atlas once and costs one request; the manifest picks a
- * prop by node name.
+ * Each bundle holds one named node per prop (the manifest picks by node name), shares one
+ * vertex-coloured material per kind of surface, and needs no textures.
  */
-import { Document, NodeIO, type Node, type Scene, type vec4 } from '@gltf-transform/core';
+import { NodeIO, type Document } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { dedup, meshopt, mergeDocuments, prune, unpartition } from '@gltf-transform/functions';
+import { dedup, meshopt, prune, weld } from '@gltf-transform/functions';
+import { PROP_VARIANTS } from '@ofa/sim';
 import { MeshoptEncoder } from 'meshoptimizer';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-interface Prop {
-	file: string;
-	/** Baked onto the node, e.g. to lay an upright model along the game's −Z forward. */
-	rotation?: vec4;
-}
+const BUNDLES = ['nature.glb', 'items.glb'];
+/** A rock's collision circle is sized from its footprint; the model must agree with the sim. */
+const FOOTPRINT_TOLERANCE = 0.01;
 
-/** +90° about X: a model pointing down −Y (the arrow's tip) ends up pointing along −Z. */
-const LAY_FORWARD: vec4 = [Math.SQRT1_2, 0, 0, Math.SQRT1_2];
-
-/** Bundle file → output node name → source. */
-const BUNDLES: Record<string, Record<string, Prop>> = {
-	'nature.glb': {
-		rock_a: { file: 'rock_single_A.gltf' },
-		rock_b: { file: 'rock_single_B.gltf' },
-		rock_c: { file: 'rock_single_C.gltf' },
-		rock_d: { file: 'rock_single_D.gltf' },
-		rock_e: { file: 'rock_single_E.gltf' },
-		tree_a: { file: 'tree_single_A.gltf' },
-		tree_b: { file: 'tree_single_B.gltf' },
-		dead_tree_small: { file: 'tree_dead_small.gltf' },
-		dead_tree_medium: { file: 'tree_dead_medium.gltf' },
-		dead_tree_large: { file: 'tree_dead_large.gltf' }
-	},
-	'items.glb': {
-		arrow: { file: 'arrow.gltf', rotation: LAY_FORWARD },
-		book_closed: { file: 'spellbook_closed.gltf' },
-		book_open: { file: 'spellbook_open.gltf' },
-		potion: { file: 'bottle_A_labeled_green.gltf.glb' }
+function findBlender(): string {
+	if (process.env.BLENDER) return process.env.BLENDER;
+	const candidates: string[] = [];
+	if (process.platform === 'win32') {
+		const root = 'C:\\Program Files\\Blender Foundation';
+		if (existsSync(root)) {
+			// Newest first: "Blender 5.2" sorts after "Blender 4.2" numerically.
+			const dirs = readdirSync(root).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+			candidates.push(...dirs.map((d) => join(root, d, 'blender.exe')));
+		}
+	} else if (process.platform === 'darwin') {
+		candidates.push('/Applications/Blender.app/Contents/MacOS/Blender');
 	}
-};
-
-const srcDirs = process.argv.slice(2);
-if (!srcDirs.length) {
-	console.error('usage: bun run assets:props <dir with the source .gltf files> [<dir> …]');
-	process.exit(1);
+	const found = candidates.find((c) => existsSync(c));
+	return found ?? 'blender';
 }
-const find = (file: string) => srcDirs.map((d) => join(d, file)).find((f) => existsSync(f));
+
+/** Farthest vertex from the node's pivot on the ground plane (glTF x/z), in node space. */
+function footprint(doc: Document, name: string): number {
+	const node = doc.getRoot().listNodes().find((n) => n.getName() === name);
+	if (!node) throw new Error(`no node ${name}`);
+	const [sx, , sz] = node.getScale();
+	let reach = 0;
+	for (const prim of node.getMesh()?.listPrimitives() ?? []) {
+		const pos = prim.getAttribute('POSITION')!;
+		const v: number[] = [];
+		for (let i = 0; i < pos.getCount(); i++) {
+			pos.getElement(i, v);
+			reach = Math.max(reach, Math.hypot(v[0] * sx, v[2] * sz));
+		}
+	}
+	return reach;
+}
+
+/**
+ * Blender's exporter sometimes emits the same triangles in a different order run to run. Sorting
+ * them (each rotated to start at its lowest index, so winding is kept) makes rebuilds
+ * byte-identical; meshopt reorders them for the vertex cache afterwards.
+ */
+function sortTriangles(doc: Document) {
+	for (const prim of doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())) {
+		const indices = prim.getIndices();
+		const a = indices?.getArray();
+		if (!indices || !a) continue;
+		const tris: [number, number, number][] = [];
+		for (let i = 0; i < a.length; i += 3) {
+			const t = [a[i], a[i + 1], a[i + 2]];
+			const r = t.indexOf(Math.min(...t));
+			tris.push([t[r], t[(r + 1) % 3], t[(r + 2) % 3]]);
+		}
+		tris.sort((x, y) => x[0] - y[0] || x[1] - y[1] || x[2] - y[2]);
+		const out = a.slice();
+		tris.forEach((t, i) => out.set(t, i * 3));
+		indices.setArray(out);
+	}
+}
+
+const passThrough = process.argv.slice(2);
+const blender = findBlender();
+const script = join(import.meta.dirname, '..', 'blender', 'build.py');
+const raw = mkdtempSync(join(tmpdir(), 'ofa-props-'));
 const outDir = join(import.meta.dirname, '..', 'public', 'models', 'props');
 mkdirSync(outDir, { recursive: true });
 
-await MeshoptEncoder.ready;
-const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
+try {
+	console.log(`blender: ${blender}`);
+	const run = spawnSync(blender, ['-b', '--factory-startup', '--python-exit-code', '1', '-P', script, '--', '--out', raw, ...passThrough], {
+		stdio: ['ignore', 'pipe', 'inherit'],
+		encoding: 'utf8'
+	});
+	if (run.error) throw new Error(`could not run Blender (${run.error.message}); set BLENDER to its executable`);
+	// Blender's own chatter is noise; the builder prints one line per prop.
+	for (const line of run.stdout.split('\n')) if (line.startsWith('  ')) console.log(line);
+	if (run.status !== 0) throw new Error(`Blender exited with ${run.status}`);
 
-for (const [bundle, props] of Object.entries(BUNDLES)) {
-	const missing = Object.values(props).filter((p) => !find(p.file));
-	if (missing.length) {
-		console.log(`${bundle.padEnd(11)} skipped (not found: ${missing.map((p) => p.file).join(', ')})`);
-		continue;
-	}
-	const doc = new Document();
-	const scene = doc.createScene('props');
-	doc.getRoot().setDefaultScene(scene);
-	for (const [name, prop] of Object.entries(props)) {
-		const src = await io.read(find(prop.file)!);
-		const merged = mergeDocuments(doc, src);
-		for (const s of src.getRoot().listScenes()) {
-			const copy = merged.get(s) as Scene;
-			const roots = copy.listChildren() as Node[];
-			if (roots.length !== 1) throw new Error(`${prop.file}: expected one root node, got ${roots.length}`);
-			copy.removeChild(roots[0]);
-			if (prop.rotation) roots[0].setRotation(prop.rotation);
-			scene.addChild(roots[0].setName(name));
-			copy.dispose();
+	await MeshoptEncoder.ready;
+	const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
+	for (const bundle of BUNDLES) {
+		// `--only <bundle>` builds a subset.
+		if (!existsSync(join(raw, bundle))) continue;
+		const doc = await io.read(join(raw, bundle));
+		if (bundle === 'nature.glb') {
+			for (const { name, footprint: want } of PROP_VARIANTS.rock) {
+				const got = footprint(doc, `rock_${name}`);
+				if (Math.abs(got - want) > want * FOOTPRINT_TOLERANCE) {
+					throw new Error(`rock_${name}: footprint ${got.toFixed(3)} ≠ PROP_VARIANTS ${want.toFixed(3)} (packages/sim/src/obstacles.ts)`);
+				}
+			}
 		}
+		sortTriangles(doc);
+		await doc.transform(dedup(), weld(), prune(), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
+		const out = join(outDir, bundle);
+		await io.write(out, doc);
+		const root = doc.getRoot();
+		const tris = root
+			.listMeshes()
+			.flatMap((m) => m.listPrimitives())
+			.reduce((n, p) => n + (p.getIndices()?.getCount() ?? 0) / 3, 0);
+		console.log(
+			`${bundle.padEnd(11)} ${(statSync(out).size / 1024).toFixed(0).padStart(4)} KB  (${root.listNodes().length} props, ${tris} tris, ${root.listMaterials().length} materials)`
+		);
 	}
-
-	// Identical texture atlases from the same pack collapse into one.
-	await doc.transform(unpartition(), dedup(), prune(), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
-	const out = join(outDir, bundle);
-	await io.write(out, doc);
-	const root = doc.getRoot();
-	console.log(`${bundle.padEnd(11)} ${(statSync(out).size / 1024).toFixed(0)} KB  (${root.listNodes().length} props, ${root.listTextures().length} textures)`);
+} finally {
+	rmSync(raw, { recursive: true, force: true });
 }

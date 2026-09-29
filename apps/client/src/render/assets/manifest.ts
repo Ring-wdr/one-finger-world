@@ -63,31 +63,31 @@ export const MODEL_MANIFEST: AssetManifest = {
 	monster2: character('skeleton_mage', { scale: 0.95, tintMaterials: ['skeleton'] }),
 	monster3: character('skeleton_warrior', { scale: 1.35, tintMaterials: ['skeleton'] }),
 
-	// Map props from KayKit Medieval Hexagon and Halloween Bits (CC0), bundled into one file
-	// by `bun run assets:props`. Each placement picks one variant.
+	// Map props modelled procedurally in Blender (apps/client/blender) at game scale, bundled into
+	// one file by `bun run assets:props`. Each placement picks one variant.
 	rock: {
 		default: 'a',
-		variants: Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((v) => [v, prop(`rock_${v}`, { scale: 5 })]))
+		variants: Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((v) => [v, prop(`rock_${v}`)]))
 	},
 	tree: {
 		default: 'a',
-		variants: { a: prop('tree_a', { scale: 2.2 }), b: prop('tree_b', { scale: 2.2 }) }
+		variants: { a: prop('tree_a'), b: prop('tree_b') }
 	},
 	deadTree: {
 		default: 'medium',
-		variants: Object.fromEntries(['small', 'medium', 'large'].map((v) => [v, prop(`dead_tree_${v}`, { scale: 0.7 })]))
+		variants: Object.fromEntries(['small', 'medium', 'large'].map((v) => [v, prop(`dead_tree_${v}`)]))
 	},
 
-	// Loot and projectiles from KayKit Adventurers and Dungeon Remastered (CC0), bundled by
-	// `bun run assets:props`. A pickup shows its item kind (weapons never drop).
+	// Loot and projectiles, from the same Blender build. A pickup shows its item kind (weapons
+	// never drop); the legendary grimoire is taller for the crystal hovering over it.
 	pickup: {
 		default: 'stat',
 		variants: {
 			stat: item('potion', { height: 0.8 }),
 			skill: item('book_closed', { height: 0.7 }),
-			bridge: item('book_open', { height: 0.7 })
+			bridge: item('book_open', { height: 0.95 })
 		}
 	},
-	// Laid along −Z by the build; centred on the flight point.
-	arrow: { url: 'models/props/items.glb', node: 'arrow', anchor: 'origin', scale: 1.3 }
+	// Points along −Z; centred on the flight point.
+	arrow: { url: 'models/props/items.glb', node: 'arrow', anchor: 'origin' }
 };
