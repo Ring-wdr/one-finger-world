@@ -34,8 +34,8 @@ if (!existsSync(vars)) {
 step('applying local D1 migrations', ['bunx', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local'], server);
 
 /** Starts a long-running child and prefixes each output line with its name. */
-function start(name: string, cmd: string[], cwd: string): ChildProcess {
-	const child = spawn(cmd[0], cmd.slice(1), { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+function start(name: string, cmd: string[], cwd: string, env: Record<string, string> = {}): ChildProcess {
+	const child = spawn(cmd[0], cmd.slice(1), { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
 	const pipe = (stream: NodeJS.ReadableStream, out: NodeJS.WriteStream) => {
 		let pending = '';
 		stream.setEncoding('utf8');
@@ -55,7 +55,8 @@ function start(name: string, cmd: string[], cwd: string): ChildProcess {
 // `*` lets the Worker accept the Vite origin (see ALLOWED_ORIGINS in apps/server/src/http.ts).
 const children = [
 	start('server', ['bunx', 'wrangler', 'dev', '--port', '8787', '--ip', '0.0.0.0', '--var', 'ALLOWED_ORIGINS:*'], server),
-	start('client', ['bun', 'run', 'dev'], client)
+	// Vite proxies /api (HTTP and WebSocket) to the Worker only when this is set (apps/client/vite.config.ts).
+	start('client', ['bun', 'run', 'dev'], client, { OFA_API_PROXY: 'http://127.0.0.1:8787' })
 ];
 
 let stopping = false;

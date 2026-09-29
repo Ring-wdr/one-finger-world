@@ -526,12 +526,10 @@ hp 비율은 살아 있으면 최소 1입니다. 목록은 255개에서 자릅�
 
 ```bash
 bun install
-cp apps/server/.dev.vars.example apps/server/.dev.vars   # AUTH_SECRET 로컬 값
-bun run db:migrate:local                                 # 로컬 D1에 스키마
-bun run dev:online                                       # wrangler dev(8787) + vite(5173, /api 프록시)
+bun run dev:online   # wrangler dev(8787) + vite(5173, /api 프록시) → http://localhost:5173
 ```
 
-오프라인 개발은 기존 `bun run dev`가 그대로입니다.
+`scripts/dev-online.ts`가 처음 한 번 필요한 준비를 합니다: `apps/client/dist`가 없으면 빌드(Worker 정적 에셋 디렉터리), `apps/server/.dev.vars`가 없으면 `.dev.vars.example` 복사(로컬 `AUTH_SECRET`), 로컬 D1 마이그레이션. Worker는 `--var ALLOWED_ORIGINS:*`로 띄워 Vite 출처의 WebSocket을 받고, Vite는 `OFA_API_PROXY`가 있을 때만 `/api`(HTTP·WS)를 프록시합니다. 그래서 오프라인 개발은 기존 `bun run dev` 그대로이고 프록시 오류도 없습니다.
 
 ### 16.2 첫 배포 (wrangler가 로그인된 로컬 머신에서)
 
@@ -555,7 +553,7 @@ git add apps/server/wrangler.jsonc && git commit -m "chore(server): record the D
 
 ## 17. 작업 분해
 
-설계·계약은 이 세션이 쓰고 구현은 Sonnet(보통 effort) 작업자가 작업별 git worktree에서 합니다. 작업 명세는 `docs/tasks/`에 있습니다.
+설계와 계약(타입·바이트 배치·상수)을 먼저 고정하고, 구현은 아래 작업으로 나눠 작업별 git worktree에서 병렬로 진행했습니다. 모두 구현·병합되었고, 표는 모듈별 소유 경계로도 읽을 수 있습니다.
 
 | 단계 | 작업 | 소유 파일 | 선행 |
 | --- | --- | --- | --- |

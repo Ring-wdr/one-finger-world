@@ -304,10 +304,11 @@ export class Game implements StageHost, GameActions {
 
 	private showOnlineResult() {
 		const online = this.online;
+		if (!online) return;
+		// Null when the connection failed before the first snapshot; the panel must still offer a way out.
 		const me = this.lastMe;
-		if (!online || !me) return;
 		const r = this.onlineResult;
-		const won = r ? r.placement === 1 : this.onlineWinner === online.selfId;
+		const won = r ? r.placement === 1 : this.onlineWinner !== null && this.onlineWinner === online.selfId;
 		const placement = r?.placement ?? (won ? 1 : (this.provisionalPlacement ?? (this.lastFrame?.world.aliveTotal ?? 0) + 1));
 		if (!this.rewarded) {
 			this.rewarded = true;
@@ -316,11 +317,11 @@ export class Game implements StageHost, GameActions {
 		result.value = {
 			won,
 			placement,
-			level: me.level,
-			kills: me.kills,
+			level: r?.level ?? me?.level ?? 1,
+			kills: r?.kills ?? me?.kills ?? 0,
 			time: r?.time ?? this.lastFrame?.world.time ?? 0,
-			tags: this.tagSummary(me),
-			items: [...me.items],
+			tags: me ? this.tagSummary(me) : [],
+			items: me ? [...me.items] : [],
 			reward: r?.reward ?? null,
 			newBest: r?.newBest ?? false,
 			canSpectate: online.phase === 'running',

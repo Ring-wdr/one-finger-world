@@ -3,6 +3,8 @@
 작성 기준: 2026-09, 브랜치 `claude/multiplayer-expansion-analysis-9upwqb`, 커밋 `bc95450` 시점 코드.
 측정치는 이 저장소의 `bun run profile` / `bun run build` 결과이고, 요금·리전 정보는 각 서비스의 2026년 공개 자료를 참고했습니다(문서 끝 링크). 요금은 자주 바뀌므로 계약 전 재확인이 필요합니다.
 
+> **후속 결정:** 2순위안(Cloudflare Workers + Durable Objects)을 채택해 구현했습니다. 설계와 운영 방법은 [multiplayer-server-design.md](multiplayer-server-design.md)에 있고, 아래 요약의 "먼저 실측" 조건은 설계 문서 14절의 채택 기준(`bun run loadtest`)으로 확인합니다.
+
 ## 요약
 
 - **컴퓨트는 병목이 아닙니다.** `packages/sim`은 12인 매치 한 판을 CPU 0.3~0.45초로 끝냅니다(시뮬레이션 1초당 1.4~2.2 ms). 코어 하나로 수십~백여 개 룸을 동시에 돌릴 수 있어, 인프라 선택은 **지연(리전)·운영 부담·트래픽 비용**으로 결정됩니다.
