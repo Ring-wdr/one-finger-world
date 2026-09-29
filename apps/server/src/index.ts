@@ -98,9 +98,16 @@ async function matchWs(request: Request, env: Env, id: string): Promise<Response
 	if (query.get('v') !== String(PROTOCOL_VERSION) || query.get('h') !== DATA_HASH) return apiError(409, 'version', 'Client version mismatch');
 	const claims = await verifyTicket(env.AUTH_SECRET, query.get('ticket') ?? '', Date.now());
 	if (!claims || claims.mid !== id) return apiError(401, 'unauthorized', 'Invalid ticket');
+	let room: DurableObjectId;
+	try {
+		room = env.MATCH.idFromString(id);
+	} catch {
+		// Well-formed but not an id of this namespace.
+		return apiError(404, 'not_found', 'No such match');
+	}
 	const forwarded = new Request(request);
 	forwarded.headers.set(SEAT_HEADER, encodeSeatHeader({ uid: claims.sub, name: claims.name, runes: claims.runes, iat: claims.iat }));
-	return env.MATCH.get(env.MATCH.idFromString(id), { locationHint: env.LOCATION_HINT as DurableObjectLocationHint }).fetch(forwarded);
+	return env.MATCH.get(room, { locationHint: env.LOCATION_HINT as DurableObjectLocationHint }).fetch(forwarded);
 }
 
 type Handler = (request: Request, env: Env) => Promise<Response> | Response;
