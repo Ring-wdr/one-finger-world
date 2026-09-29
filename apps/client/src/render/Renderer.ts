@@ -45,6 +45,12 @@ const RARITY_GLOW = 0.3;
 const DUMMY_COLOR = 0xc9b37e;
 const monsterKey = (m: Monster): AssetKey => `monster${m.tier}`;
 
+/**
+ * Side of the square map cells props are instanced by. A view (or the shadow box) covers a few
+ * cells, so most of the 240-unit map stays culled; smaller cells would cull more but cost draws.
+ */
+const PROP_CELL = 40;
+
 /** A corpse lies still this long after its death clip ends, then sinks out of sight. */
 const CORPSE_HOLD = 1.2;
 const CORPSE_SINK = 0.8;
@@ -263,6 +269,10 @@ export class Renderer {
 	/**
 	 * Static props give the eye fixed landmarks, which reduces perceived motion.
 	 * Rebuilt (same seeded layout) when a prop model arrives.
+	 *
+	 * Instanced per model and map cell, not per model: an InstancedMesh is culled as a whole, so a
+	 * map-wide one would draw every prop every frame (twice, with the shadow pass). Per cell, the
+	 * camera and shadow frustums drop the cells out of view.
 	 */
 	private buildProps() {
 		const keys = ['rock', 'tree', 'deadTree'] as const;
@@ -281,17 +291,16 @@ export class Renderer {
 
 		// Layout (position, scale, yaw, variant) comes from the sim, which also collides with the
 		// same props, so what blocks a unit is exactly what is drawn.
-		const placed = new Map<AssetKey, Map<string | undefined, THREE.Matrix4[]>>();
+		const placed = new Map<string, { key: AssetKey; variant: string | undefined; matrices: THREE.Matrix4[] }>();
 		const up = new THREE.Vector3(0, 1, 0);
 		for (const p of MAP_PROPS) {
 			const vs = variantsOf(p.kind);
 			const name = PROP_VARIANTS[p.kind][p.variant]?.name;
 			const v = name !== undefined && vs.includes(name) ? name : vs[p.variant % vs.length];
-			const byVariant = placed.get(p.kind) ?? new Map<string | undefined, THREE.Matrix4[]>();
-			placed.set(p.kind, byVariant);
-			const list = byVariant.get(v) ?? [];
-			byVariant.set(v, list);
-			list.push(
+			const id = `${p.kind}:${v}:${Math.floor(p.x / PROP_CELL)},${Math.floor(p.y / PROP_CELL)}`;
+			const group = placed.get(id) ?? { key: p.kind, variant: v, matrices: [] };
+			placed.set(id, group);
+			group.matrices.push(
 				new THREE.Matrix4().compose(
 					toThree(p),
 					new THREE.Quaternion().setFromAxisAngle(up, p.yaw),
@@ -300,15 +309,16 @@ export class Renderer {
 			);
 		}
 
-		for (const [key, byVariant] of placed) {
-			for (const [variant, matrices] of byVariant) {
-				for (const part of this.assets.instancedParts(key, variant)) {
-					const mesh = new THREE.InstancedMesh(part.geometry, part.material, matrices.length);
-					mesh.castShadow = true;
-					matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
-					this.props.push(mesh);
-					this.scene.add(mesh);
-				}
+		for (const { key, variant, matrices } of placed.values()) {
+			// Parts are cached per model, so every cell shares one geometry and material.
+			for (const part of this.assets.instancedParts(key, variant)) {
+				const mesh = new THREE.InstancedMesh(part.geometry, part.material, matrices.length);
+				mesh.castShadow = true;
+				matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
+				// Bounds over this cell's instances only, for culling.
+				mesh.computeBoundingSphere();
+				this.props.push(mesh);
+				this.scene.add(mesh);
 			}
 		}
 	}
