@@ -607,7 +607,7 @@ export class Hud {
 		const dx = e.thumb.x - e.start.x;
 		const dy = e.thumb.y - e.start.y;
 		const l = Math.hypot(dx, dy);
-		const max = 56;
+		const max = 52;
 		const s = l > max ? max / l : 1;
 		knob.style.transform = `translate(${dx * s}px, ${dy * s}px)`;
 		joy.classList.toggle('run', e.type === 'drag' && e.mode === 'run');

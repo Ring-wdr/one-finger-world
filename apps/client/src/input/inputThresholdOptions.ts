@@ -54,7 +54,7 @@ export const INPUT_THRESHOLD_RANGES = Object.freeze({
 	fastDragPxPerMs: Object.freeze({ min: 0.6, max: 1.2, step: 0.1, unit: 'px/ms' })
 });
 
-const FIXED_RUN_DISTANCE_PX = 72;
+const FIXED_RUN_DISTANCE_PX = 52;
 const FIXED_DASH_WINDOW_MS = 320;
 
 export function clampInputThresholdOptions(

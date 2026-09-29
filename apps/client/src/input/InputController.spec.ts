@@ -381,7 +381,7 @@ describe('InputController', () => {
 		const { target, gestures } = setup();
 
 		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
-		target.fire('pointermove', { pointerId: 1, clientX: 70, clientY: 0, timeStamp: 140 });
+		target.fire('pointermove', { pointerId: 1, clientX: 50, clientY: 0, timeStamp: 140 });
 
 		expect(gestures).toEqual([{ type: 'move', mode: 'walk', direction: { x: 1, y: 0 } }]);
 	});
@@ -390,7 +390,7 @@ describe('InputController', () => {
 		const { target, gestures } = setup();
 
 		target.fire('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, timeStamp: 0 });
-		target.fire('pointermove', { pointerId: 1, clientX: 72, clientY: 0, timeStamp: 140 });
+		target.fire('pointermove', { pointerId: 1, clientX: 52, clientY: 0, timeStamp: 140 });
 
 		expect(gestures).toEqual([{ type: 'move', mode: 'run', direction: { x: 1, y: 0 } }]);
 	});
@@ -575,7 +575,7 @@ describe('InputController', () => {
 		if (skillButtons?.type === 'skill-buttons') {
 			for (const button of skillButtons.buttons) {
 				const distance = Math.hypot(button.center.x - 100, button.center.y - 120);
-				expect(distance - button.radius).toBeGreaterThan(72);
+				expect(distance - button.radius).toBeGreaterThan(52);
 			}
 		}
 	});

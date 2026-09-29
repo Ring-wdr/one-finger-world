@@ -44,7 +44,7 @@ describe('inputThresholdOptions', () => {
 		expect(thresholds).toEqual({
 			tapMs: 280,
 			dragStartPx: 8,
-			runDistancePx: 72,
+			runDistancePx: 52,
 			fastDragPxPerMs: 0.6,
 			dashWindowMs: 320
 		});
