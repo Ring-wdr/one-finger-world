@@ -22,6 +22,7 @@
 		"balance": "bun packages/sim/scripts/balance.ts",
 		"profile": "bun packages/sim/scripts/profile.ts",
 		"loadtest": "bun apps/server/scripts/loadtest.ts",
+		"multiplayer": "bun apps/server/scripts/multiplayer.ts",
 		"assets:characters": "bun apps/client/scripts/build-characters.ts",
 		"assets:props": "bun apps/client/scripts/build-props.ts"
 	},

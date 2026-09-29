@@ -30,6 +30,8 @@ export interface HealthResponse {
 	ok: true;
 	protocol: number;
 	dataHash: string;
+	/** False while the operator has closed online play; the client then explains instead of queueing. */
+	multiplayer: boolean;
 }
 
 export interface GuestResponse {
@@ -65,6 +67,7 @@ export type ApiErrorCode =
 	| 'bad_name'
 	| 'conflict'
 	| 'version'
+	| 'closed'
 	| 'server';
 
 export interface ApiErrorBody {

@@ -634,7 +634,7 @@ describe('OnlineMatch errors and retries', () => {
 		expect(h.match.phase).toBe('error');
 	});
 
-	it('maps quickplay failures: 401 → unauthorized, anything else → network', async () => {
+	it('maps quickplay failures: 401 → unauthorized, 503 closed → closed, anything else → network', async () => {
 		const h = harness();
 		h.quickplay.mockRejectedValueOnce(new ApiRequestError(401, 'unauthorized', 'no'));
 		await h.match.start();
@@ -645,7 +645,9 @@ describe('OnlineMatch errors and retries', () => {
 		await h.match.start();
 		h.quickplay.mockRejectedValueOnce(new ApiRequestError(0, 'network', 'offline'));
 		await h.match.start();
-		expect(h.rec.errors.map((e) => e.code)).toEqual(['unauthorized', 'network', 'network']);
+		h.quickplay.mockRejectedValueOnce(new ApiRequestError(503, 'closed', 'closed by the operator'));
+		await h.match.start();
+		expect(h.rec.errors.map((e) => e.code)).toEqual(['unauthorized', 'network', 'network', 'closed']);
 	});
 
 	it('drops a quickplay answer that arrives after leave()', async () => {

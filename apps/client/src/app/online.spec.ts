@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProfileDto } from '@ofa/net';
 import { ApiRequestError, type ApiClient } from '../net/api';
-import { apiErrorText, buyRuneOnline, initOnline, onlineAvailable, playerName, renameOnline, requestBusy, toggleRuneOnline } from './online';
+import { apiErrorText, buyRuneOnline, checkMultiplayer, initOnline, MULTIPLAYER_CLOSED_TEXT, multiplayerOpen, onlineAvailable, queueErrorText, playerName, renameOnline, requestBusy, toggleRuneOnline } from './online';
 import { profile, profileSource } from './store';
 
 const dto = (over: Partial<ProfileDto> = {}): ProfileDto => ({
@@ -18,7 +18,7 @@ const dto = (over: Partial<ProfileDto> = {}): ProfileDto => ({
 type FakeApi = Pick<ApiClient, 'health' | 'ensureGuest' | 'buy' | 'equip' | 'rename'>;
 const fake = (over: Partial<Record<keyof FakeApi, unknown>> = {}) =>
 	({
-		health: vi.fn(async () => ({ ok: true })),
+		health: vi.fn(async () => ({ ok: true, multiplayer: true })),
 		ensureGuest: vi.fn(async () => dto()),
 		buy: vi.fn(async () => dto()),
 		equip: vi.fn(async () => dto()),
@@ -30,6 +30,7 @@ const localProfile = { coins: 7, owned: [], equipped: { offense: null, defense: 
 
 beforeEach(() => {
 	onlineAvailable.value = false;
+	multiplayerOpen.value = true;
 	profileSource.value = 'local';
 	profile.value = localProfile;
 	playerName.value = '';
@@ -106,5 +107,26 @@ describe('server-mode requests', () => {
 		expect(buy).toHaveBeenCalledTimes(1);
 		release(dto());
 		await first;
+	});
+});
+
+describe('operator switch', () => {
+	it('keeps the server profile but marks online play closed', async () => {
+		await initOnline(fake({ health: vi.fn(async () => ({ ok: true, multiplayer: false })) }));
+		expect(onlineAvailable.value).toBe(true);
+		expect(multiplayerOpen.value).toBe(false);
+		expect(profileSource.value).toBe('server');
+	});
+
+	it('re-checks before queueing: closed text, network text, or go ahead', async () => {
+		expect(await checkMultiplayer(fake({ health: vi.fn(async () => ({ ok: true, multiplayer: false })) }))).toBe(MULTIPLAYER_CLOSED_TEXT);
+		expect(multiplayerOpen.value).toBe(false);
+		expect(await checkMultiplayer(fake({ health: vi.fn(async () => null) }))).toBe('서버에 연결할 수 없어요');
+		expect(await checkMultiplayer(fake())).toBeNull();
+		expect(multiplayerOpen.value).toBe(true);
+	});
+
+	it('explains a quickplay refused because online play closed meanwhile', () => {
+		expect(queueErrorText('closed')).toBe(MULTIPLAYER_CLOSED_TEXT);
 	});
 });

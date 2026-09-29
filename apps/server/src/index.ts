@@ -4,6 +4,7 @@ import { signToken, TICKET_TTL_MS, verifyGuest, verifyTicket } from './auth';
 import { createPlayer, getProfile, renamePlayer, updateProfile } from './db';
 import { apiError, bearer, corsHeaders, json, originAllowed, readJson } from './http';
 import { encodeSeatHeader, SEAT_HEADER } from './match/types';
+import { multiplayerOpen } from './settings';
 
 export { Lobby } from './lobby';
 export { MatchRoom } from './match/room';
@@ -73,6 +74,8 @@ async function quickplay(request: Request, env: Env): Promise<Response> {
 	const uid = await authenticate(request, env);
 	if (!uid) return NOT_SIGNED_IN();
 	if (!(await env.PLAY_LIMITER.limit({ key: uid })).success) return apiError(429, 'rate_limited', 'Too many requests');
+	// Matches already running play out; only new ones are refused.
+	if (!(await multiplayerOpen(env.DB))) return apiError(503, 'closed', 'Online play is closed by the operator');
 	const p = await getProfile(env.DB, uid);
 	if (!p) return NOT_SIGNED_IN();
 	const lobby = env.LOBBY.getByName('lobby', { locationHint: env.LOCATION_HINT as DurableObjectLocationHint });
@@ -113,7 +116,10 @@ async function matchWs(request: Request, env: Env, id: string): Promise<Response
 type Handler = (request: Request, env: Env) => Promise<Response> | Response;
 
 const ROUTES: Record<string, { method: 'GET' | 'POST'; handler: Handler }> = {
-	[API.health]: { method: 'GET', handler: () => json({ ok: true, protocol: PROTOCOL_VERSION, dataHash: DATA_HASH } satisfies HealthResponse) },
+	[API.health]: {
+		method: 'GET',
+		handler: async (_request, env) => json({ ok: true, protocol: PROTOCOL_VERSION, dataHash: DATA_HASH, multiplayer: await multiplayerOpen(env.DB) } satisfies HealthResponse)
+	},
 	[API.guest]: { method: 'POST', handler: guest },
 	[API.profile]: { method: 'GET', handler: profile },
 	[API.name]: { method: 'POST', handler: rename },

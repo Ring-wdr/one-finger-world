@@ -11,6 +11,10 @@ import { profile, profileSource, safeStorage } from './store';
  */
 
 export const onlineAvailable = signal(false);
+/** The operator's switch (health `multiplayer`); closed keeps the button but explains instead of queueing. */
+export const multiplayerOpen = signal(true);
+/** Shown by the menu when the online button is pressed while closed. */
+export const MULTIPLAYER_CLOSED_TEXT = '관리자가 멀티플레이를 잠시 닫아 두었어요. 연습 매치는 그대로 할 수 있어요.';
 export const playerName = signal('');
 export const lobby = signal<LobbyView | null>(null);
 /** performance.now() when `lobby` arrived, for the start countdown. */
@@ -45,7 +49,9 @@ function applyServerProfile(d: ProfileDto) {
 /** Probe the API; on success switch to the server profile. Never throws. */
 export async function initOnline(api: ApiClient = getApi()): Promise<void> {
 	client = api;
-	if ((await api.health()) === null) return;
+	const health = await api.health();
+	if (health === null) return;
+	multiplayerOpen.value = health.multiplayer !== false;
 	try {
 		const d = await api.ensureGuest();
 		batch(() => {
@@ -55,6 +61,17 @@ export async function initOnline(api: ApiClient = getApi()): Promise<void> {
 	} catch (e) {
 		console.warn('[online] unavailable, staying offline:', e);
 	}
+}
+
+/**
+ * Asks the server again right before queueing, so a switch flipped after page load is respected.
+ * Resolves to the text to show instead of queueing, or null to go ahead.
+ */
+export async function checkMultiplayer(api: ApiClient = getApi()): Promise<string | null> {
+	const health = await api.health();
+	if (health === null) return '서버에 연결할 수 없어요';
+	multiplayerOpen.value = health.multiplayer !== false;
+	return multiplayerOpen.value ? null : MULTIPLAYER_CLOSED_TEXT;
 }
 
 /** Korean text for a failed API call. */
@@ -89,6 +106,8 @@ export function queueErrorText(code: OnlineErrorCode): string {
 			return '참가할 수 있는 매치를 찾지 못했어요';
 		case 'unauthorized':
 			return '계정을 확인하지 못했어요. 새로고침해 주세요';
+		case 'closed':
+			return MULTIPLAYER_CLOSED_TEXT;
 		case 'network':
 			return '서버에 연결할 수 없어요';
 		default:

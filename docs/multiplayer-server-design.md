@@ -44,6 +44,8 @@ Cloudflare 기능 선택의 근거는 `cloudflare/cloudflare-docs` 저장소(202
 | Workers Free | DO 요청 10만/일, 13,000 GB-s/일 | 요청 기준 약 24판, 시간 기준 약 300판 |
 | Workers Paid (월 5달러) | 요청 100만/월 포함 후 100만당 0.15달러, 40만 GB-s/월 포함 후 100만 GB-s당 12.5달러 | 제한 없음. 매치당 약 0.0012달러 |
 
+유료 플랜은 상한 없이 쓴 만큼 냅니다. 월 5달러에 포함된 양은 사람 12명 매치로 약 250판(요청 기준, 하루 약 8판)이고, 그 뒤로는 판당 약 0.0012달러(요청 0.0006 + 실행 시간 0.0005)가 붙습니다. 예: 하루 100판이면 월 약 6.7달러, 하루 1,000판이면 월 약 34달러입니다.
+
 사람이 적은 매치(대부분 봇)는 요청이 훨씬 적습니다. 출시 전 테스트는 무료 플랜으로 충분하고, 공개 출시는 유료 플랜을 전제로 합니다.
 
 ## 3. 전체 구조
@@ -235,19 +237,34 @@ DO는 알람을 하나만 가질 수 있으므로 `MatchCore`가 다음 마감 �
 
 | 메서드 | 경로 | 인증 | 요청 | 응답 | 레이트 리밋 |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/api/health` | 없음 | - | `HealthResponse { ok, protocol, dataHash }` | - |
+| GET | `/api/health` | 없음 | - | `HealthResponse { ok, protocol, dataHash, multiplayer }` | - |
 | POST | `/api/guest` | 없음 | - | `GuestResponse { token, profile }` | `GUEST_LIMITER` IP당 30/60초 |
 | GET | `/api/profile` | Bearer 게스트 토큰 | - | `ProfileResponse { profile }` | - |
 | POST | `/api/profile/name` | Bearer | `{ name }` | `ProfileResponse` | - |
 | POST | `/api/shop/buy` | Bearer | `{ runeId }` | `ProfileResponse` | - |
 | POST | `/api/shop/equip` | Bearer | `{ runeId }` | `ProfileResponse` (장착 중인 룬이면 해제) | - |
-| POST | `/api/quickplay` | Bearer | - | `QuickplayResponse { matchId, ticket }` | `PLAY_LIMITER` uid당 20/60초 |
+| POST | `/api/quickplay` | Bearer | - | `QuickplayResponse { matchId, ticket }`, 닫혀 있으면 503 `closed` | `PLAY_LIMITER` uid당 20/60초 |
 | GET | `/api/match/:id/ws` | 쿼리 `ticket` | `v`, `h` 쿼리 | 101 | - |
 
-- 상태 코드: 400 `bad_request`, 401 `unauthorized`, 404 `not_found`, 409 `coins`·`owned`·`conflict`·`version`, 422 `unknown_rune`·`bad_name`, 426 WebSocket 아님, 429 `rate_limited`, 500 `server`.
+- 상태 코드: 400 `bad_request`, 401 `unauthorized`, 404 `not_found`, 409 `coins`·`owned`·`conflict`·`version`, 422 `unknown_rune`·`bad_name`, 426 WebSocket 아님, 429 `rate_limited`, 500 `server`, 503 `closed`(운영 스위치, 7.1).
 - `/api/match/:id/ws`는 `Upgrade: websocket`, `:id` 형식(64자리 16진수), 티켓 서명·만료·`mid` 일치, `v == PROTOCOL_VERSION`, `h == DATA_HASH`를 확인한 뒤 `X-OFA-Seat` 헤더를 붙여 `env.MATCH.get(idFromString(id), { locationHint }).fetch(request)`로 넘깁니다. 버전이 다르면 409 `version`입니다.
 - CORS: 같은 출처 요청은 헤더가 필요 없습니다. `Origin`이 `ALLOWED_ORIGINS`(쉼표 목록)에 있으면 CORS 헤더를 붙이고 `OPTIONS`에 204로 답합니다. WebSocket은 `Origin`이 없거나, 같은 출처이거나, 허용 목록에 있어야 합니다(교차 사이트 WebSocket 탈취 방지).
 - 무료 플랜 Worker는 요청당 CPU 10 ms입니다. 모든 핸들러는 서명 1~2회와 D1 호출 1~3회로 끝나야 합니다.
+
+### 7.1 운영 스위치 (멀티플레이 켜기/끄기)
+
+무료 플랜 한도를 지키거나 장애에 대응할 때 관리자가 재배포 없이 온라인 매치를 닫습니다.
+
+```bash
+bun run multiplayer -- off      # 닫기 (원격 D1)
+bun run multiplayer -- on       # 열기
+bun run multiplayer -- status   # 현재 값 (--local: wrangler dev의 로컬 D1)
+```
+
+- 값은 D1 `settings` 테이블의 `multiplayer` 행(`on`/`off`, `migrations/0002_settings.sql`)입니다. 스크립트는 로그인된 wrangler로 `d1 execute`만 하므로 새 비밀이나 관리자 API가 없습니다. 대시보드의 D1 콘솔에서 행을 고쳐도 됩니다.
+- Worker는 isolate마다 10초 캐시(`SETTINGS_CACHE_MS`)로 읽으므로 전 세계 반영까지 최대 10초입니다. 행이 없으면 열림, 읽기에 실패하면 마지막 값을 씁니다.
+- 닫히면 `/api/quickplay`가 503 `closed`를 돌려주고 `/api/health`의 `multiplayer`가 `false`가 됩니다. 이미 진행 중인 매치와 프로필·상점 API는 그대로입니다.
+- 클라이언트는 온라인 매치 버튼을 그대로 두되 "지금은 닫혀 있어요"로 표시하고, 누르면 서버에 다시 확인한 뒤 닫혀 있으면 대기열에 들어가지 않고 안내 팝업만 띄웁니다. 버튼을 누른 사이에 닫힌 경우에도 대기 화면이 같은 문구를 보여 줍니다.
 
 ## 8. 인증 토큰
 

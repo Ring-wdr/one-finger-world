@@ -35,7 +35,7 @@ export interface LobbyView {
 	startsInMs: number | null;
 }
 
-export type OnlineErrorCode = 'full' | 'started' | 'ended' | 'version' | 'server' | 'network' | 'unauthorized';
+export type OnlineErrorCode = 'full' | 'started' | 'ended' | 'version' | 'server' | 'network' | 'unauthorized' | 'closed';
 
 export interface OnlineCallbacks {
 	onLobby(l: LobbyView): void;
@@ -350,6 +350,7 @@ export class OnlineMatch {
 		} catch (e) {
 			if (gen !== this.generation) return;
 			if (e instanceof ApiRequestError && e.status === 401) this.fail('unauthorized', e.message);
+			else if (e instanceof ApiRequestError && e.code === 'closed') this.fail('closed', e.message);
 			else this.fail('network', e instanceof Error ? e.message : 'network error');
 		}
 	}

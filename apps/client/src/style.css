@@ -1142,3 +1142,22 @@ body {
 	color: inherit;
 	font: inherit;
 }
+
+/* Operator closed online play: the button stays, a tap explains why. */
+.btn.play.closed {
+	filter: grayscale(0.7);
+	opacity: 0.8;
+}
+.modal {
+	position: fixed;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: 16px;
+	background: rgba(8, 10, 14, 0.7);
+	pointer-events: auto;
+	z-index: 10;
+}
+.modal .panel {
+	max-width: 340px;
+}

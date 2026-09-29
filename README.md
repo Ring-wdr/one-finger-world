@@ -73,6 +73,18 @@ git add apps/server/wrangler.jsonc && git commit -m "chore(server): record the D
 - 배포하면 진행 중인 매치의 소켓이 끊기고 체크포인트(최대 2초 전)에서 이어집니다. 사람이 많을 때는 피합니다.
 - **GitHub Pages판을 서버에 붙이려면** 저장소 변수 `VITE_API_ORIGIN`에 Worker 주소(예: `https://one-finger-royale.<계정>.workers.dev`)를 넣습니다. 비워 두면 Pages 빌드는 오프라인 전용입니다. 이 경우 Worker의 `ALLOWED_ORIGINS`(`apps/server/wrangler.jsonc`, 쉼표 목록)에 Pages 출처(`https://ring-wdr.github.io`)가 있어야 교차 출처 호출과 WebSocket이 허용됩니다.
 
+## 멀티플레이 켜기/끄기
+
+재배포 없이 관리자가 온라인 매치를 닫을 수 있습니다(무료 플랜 한도 관리, 장애 대응). 닫히면 메뉴의 온라인 매치 버튼이 "지금은 닫혀 있어요"로 바뀌고, 누르면 안내 팝업만 뜹니다. 진행 중인 매치는 끝까지 갑니다.
+
+```bash
+bun run multiplayer -- off      # 닫기 (wrangler가 로그인된 PC에서, 원격 D1)
+bun run multiplayer -- on       # 다시 열기
+bun run multiplayer -- status   # 현재 상태 (--local: 로컬 개발 서버)
+```
+
+반영까지 최대 10초 걸립니다. 자세한 동작은 설계 문서 7.1절에 있습니다.
+
 ## 지연 측정
 
 ```bash
