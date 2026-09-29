@@ -3,6 +3,7 @@ import { summarizeBuild } from './build';
 import {
 	applyBuild,
 	castSkills,
+	DASH_COOLDOWN,
 	dealDamage,
 	ensureOffer,
 	performAttack,
@@ -162,6 +163,7 @@ export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
 		combo: 1,
 		comboTimer: 0,
 		dashCd: 0,
+		dashCdMax: DASH_COOLDOWN,
 		dashTime: 0,
 		dashDir: { x: 0, y: 1 },
 		dashHit: [],
@@ -193,7 +195,7 @@ export function applyCommand(world: World, f: Fighter, cmd: Command) {
 			f.attackQueued = 0.25;
 			return;
 		case 'dash':
-			startDash(world, f, cmd.dir);
+			startDash(world, f, cmd.dir, cmd.touch === true);
 			return;
 		case 'draft': {
 			const id = f.offer?.[cmd.index];

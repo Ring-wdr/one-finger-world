@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { DASH_DISTANCE, dealDamage, killUnit, spawnProjectile, sweepCircle } from './combat';
+import {
+	DASH_CD_FLOOR,
+	DASH_COOLDOWN,
+	DASH_DISTANCE,
+	TOUCH_DASH_CD_SCALE,
+	dashCooldown,
+	dealDamage,
+	killUnit,
+	spawnProjectile,
+	sweepCircle
+} from './combat';
 import { spawnMonster } from './monsters';
 import { isClear } from './obstacles';
 import { MAP_RADIUS, type Command, type GameEvent } from './types';
@@ -104,6 +114,29 @@ describe('dash', () => {
 		expect(dist(me.pos, start)).toBeCloseTo(DASH_DISTANCE, 6);
 		expect(ev.to.x).toBeCloseTo(me.pos.x, 6);
 		expect(ev.to.y).toBeCloseTo(me.pos.y, 6);
+	});
+});
+
+describe('dash cooldown', () => {
+	it('is shorter for a touch dash than a keyboard dash', () => {
+		const { world, me } = sandbox();
+		step(world, cmds(me.id, [{ type: 'dash', dir: { x: 1, y: 0 } }]));
+		const keyboard = me.dashCdMax;
+		expect(keyboard).toBeCloseTo(DASH_COOLDOWN, 6);
+
+		me.dashCd = 0;
+		me.dashTime = 0;
+		step(world, cmds(me.id, [{ type: 'dash', dir: { x: 1, y: 0 }, touch: true }]));
+		expect(me.dashCdMax).toBeCloseTo(keyboard * TOUCH_DASH_CD_SCALE, 6);
+		expect(me.dashCd).toBeLessThanOrEqual(me.dashCdMax);
+	});
+
+	it('never drops below the floor, however much the build and input cut it', () => {
+		const { me } = sandbox();
+		me.build.tiers.speed = 2;
+		me.build.stats.cdr = 0.6;
+		expect(dashCooldown(me, false)).toBeGreaterThanOrEqual(DASH_CD_FLOOR);
+		expect(dashCooldown(me, true)).toBe(DASH_CD_FLOOR);
 	});
 });
 

@@ -23,7 +23,8 @@ export function ringOf(p: Vec2): RingId {
 export type Command =
 	| { type: 'move'; dir: Vec2 | null; run: boolean }
 	| { type: 'attack' }
-	| { type: 'dash'; dir: Vec2 }
+	/** `touch`: sent from the one-finger double flick, which gets a shorter cooldown. */
+	| { type: 'dash'; dir: Vec2; touch?: boolean }
 	| { type: 'draft'; index: number }
 	| { type: 'reroll' }
 	| { type: 'exchange'; itemIndex: number };
@@ -86,6 +87,8 @@ export interface Fighter extends UnitBase {
 	combo: 1 | 2 | 3;
 	comboTimer: number;
 	dashCd: number;
+	/** The cooldown the last dash started with (it depends on build and input). */
+	dashCdMax: number;
 	dashTime: number;
 	dashDir: Vec2;
 	dashHit: number[];

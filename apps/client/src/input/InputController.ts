@@ -67,6 +67,8 @@ export class InputController {
 	private active: ActivePointer | null = null;
 	private comboStep: ComboStep = 1;
 	private lastFastDragTime: number | null = null;
+	/** Whether that first fast drag came from a finger or stylus (not a mouse). */
+	private lastFastDragTouch = false;
 	private disposed = false;
 
 	constructor(
@@ -230,11 +232,15 @@ export class InputController {
 				event.timeStamp - this.lastFastDragTime <= this.thresholds.dashWindowMs
 			) {
 				this.lastFastDragTime = null;
-				this.emit({ type: 'dash', direction });
+				// Only a double flick made entirely by touch earns the shorter cooldown: a mouse
+				// flick is as easy as the keyboard's dash key, so desktop players can't farm it.
+				const touch = this.lastFastDragTouch && isTouchPointer(event);
+				this.emit(touch ? { type: 'dash', direction, touch } : { type: 'dash', direction });
 				return;
 			}
 
 			this.lastFastDragTime = event.timeStamp;
+			this.lastFastDragTouch = isTouchPointer(event);
 		}
 
 		this.emit({ type: 'idle' });
@@ -385,4 +391,8 @@ function normalizeSignedZero(direction: Direction2): Direction2 {
 		x: direction.x === 0 ? 0 : direction.x,
 		y: direction.y === 0 ? 0 : direction.y
 	};
+}
+
+function isTouchPointer(event: PointerEvent) {
+	return event.pointerType === 'touch' || event.pointerType === 'pen';
 }
