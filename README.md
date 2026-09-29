@@ -3,6 +3,8 @@
 한 손가락으로 하는 3D 실시간 육성 배틀로얄. 현재 단계는 **싱글플레이 빌드 시스템 프로토타입**입니다 (플레이어 1명 + 봇 11명).
 3D 멀미를 고려해 **고정 각도 쿼터뷰**를 씁니다. 카메라는 감쇠 이동만 하고 회전, 흔들림, 헤드밥은 없습니다.
 
+**플레이: https://ring-wdr.github.io/one-finger-world/** — `main`에 푸시될 때마다 GitHub Actions(`.github/workflows/deploy-pages.yml`)가 타입체크·테스트 후 자동 배포합니다.
+
 ```bash
 bun install
 bun run dev        # http://localhost:5173 (--host: 같은 와이파이의 폰에서 접속 가능)
