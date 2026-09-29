@@ -39,6 +39,9 @@ jobs:
       # need it as their base. Models load relative to the page and follow along.
       - name: Build
         working-directory: apps/client
+        env:
+          # Empty keeps the Pages build offline-only; set the repository variable to reach the Worker.
+          VITE_API_ORIGIN: ${{ vars.VITE_API_ORIGIN }}
         run: bun x vite build --base="${{ steps.pages.outputs.base_path }}/"
 
       - uses: actions/upload-pages-artifact@v5

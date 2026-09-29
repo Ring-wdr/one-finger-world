@@ -1,6 +1,6 @@
 # One Finger Royale
 
-한 손가락으로 하는 3D 실시간 육성 배틀로얄. 현재 단계는 **싱글플레이 빌드 시스템 프로토타입**입니다 (플레이어 1명 + 봇 11명).
+한 손가락으로 하는 3D 실시간 육성 배틀로얄. **싱글플레이(플레이어 1명 + 봇 11명)** 는 브라우저만으로 동작하고, **온라인 멀티플레이**(최대 12명, 빈 자리는 봇)는 Cloudflare Worker 서버가 맡습니다.
 3D 멀미를 고려해 **고정 각도 쿼터뷰**를 씁니다. 카메라는 감쇠 이동만 하고 회전, 흔들림, 헤드밥은 없습니다.
 
 **플레이: https://ring-wdr.github.io/one-finger-world/** — `main`에 푸시될 때마다 GitHub Actions(`.github/workflows/deploy-pages.yml`)가 타입체크·테스트 후 자동 배포합니다.
@@ -10,6 +10,7 @@ bun install
 bun run dev        # http://localhost:5173 (--host: 같은 와이파이의 폰에서 접속 가능)
 bun run test       # sim 규칙 + 입력 컨트롤러 테스트
 bun run typecheck
+bun run dev:online # 서버까지 함께 띄우는 온라인 개발 (아래 "멀티플레이" 참고)
 bun run balance -- 60 12   # 봇끼리 60판 헤드리스 시뮬레이션 → 태그·리스크 성향별 승률
 bun run assets:props       # 블렌더(4.2+)로 소품·전리품 모델 재생성 (--preview <dir>: 미리보기 렌더)
 ```
@@ -34,6 +35,54 @@ bun run assets:props       # 블렌더(4.2+)로 소품·전리품 모델 재생�
 
 키보드(개발용): WASD 이동, Space 공격, Shift 대시, E 드래프트, 1/2/3 선택, R 리롤, B 빌드
 
+## 멀티플레이 (온라인)
+
+서버가 게임을 **권위적으로** 돌립니다. 클라이언트는 입력만 보내고, 같은 `packages/sim`으로 자기 이동을 예측하며 나머지는 보간합니다. 전체 설계와 프로토콜은 [docs/multiplayer-server-design.md](docs/multiplayer-server-design.md)에 있습니다.
+
+| 구성 | 하는 일 |
+| --- | --- |
+| Worker (`apps/server/src/index.ts`) | HTTP API(게스트, 프로필, 상점, 빠른 대전)와 WebSocket 연결 검증 |
+| Durable Object `Lobby` | 빠른 대전 대기열, 방 배정, 가득 차면 1.5초 뒤 시작 |
+| Durable Object `MatchRoom` | 매치 하나의 20Hz 틱 루프(`packages/sim`), 입력 큐, 스냅샷 전송, 봇 대행, 체크포인트 |
+| D1 | 게스트 프로필, 코인, 룬 소유·장착, 보상 지급 기록 |
+| 정적 에셋 | 같은 Worker가 클라이언트 빌드(`apps/client/dist`)를 서비스합니다. `/api/*`만 Worker가 실행됩니다 |
+
+## 로컬 온라인 개발
+
+```bash
+bun install
+bun run dev:online     # http://localhost:5173 을 엽니다
+```
+
+`scripts/dev-online.ts`가 필요한 준비를 자동으로 합니다. `apps/client/dist`가 없으면 한 번 빌드하고, `apps/server/.dev.vars`가 없으면 `.dev.vars.example`을 복사하고(로컬 전용 `AUTH_SECRET`), 로컬 D1 마이그레이션을 적용한 뒤 `wrangler dev`(8787)와 Vite(5173)를 함께 띄웁니다. 출력은 `[server]`/`[client]`로 구분되고 Ctrl+C로 둘 다 종료합니다. 브라우저는 Vite 주소로 접속하고 `/api`(WebSocket 포함)는 Worker로 프록시됩니다. 이때 Worker가 Vite의 `Origin`을 받도록 `ALLOWED_ORIGINS`를 `*`(모든 출처)로 실행합니다. 로컬 개발 전용이고, 배포 설정에는 명시한 목록만 둡니다. 오프라인 개발은 기존 `bun run dev` 그대로입니다.
+
+## 배포
+
+**첫 배포**는 wrangler에 로그인된 로컬 머신에서 합니다 (설계 문서 16.2).
+
+```bash
+cd apps/server
+npx wrangler secret put AUTH_SECRET     # openssl rand -base64 48 값을 붙여 넣기
+cd ../..
+bun run deploy                          # 클라이언트 빌드 → wrangler deploy (D1이 만들어지고 ID가 wrangler.jsonc에 기록됨)
+bun run db:migrate:remote               # 원격 D1에 스키마
+git add apps/server/wrangler.jsonc && git commit -m "chore(server): record the D1 database id"
+```
+
+- 그 뒤에는 GitHub Actions의 **Deploy to Cloudflare**(`.github/workflows/deploy-cloudflare.yml`)를 수동 실행하면 타입체크·테스트·빌드·원격 마이그레이션·배포까지 합니다. 저장소 비밀 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 필요합니다.
+- 배포하면 진행 중인 매치의 소켓이 끊기고 체크포인트(최대 2초 전)에서 이어집니다. 사람이 많을 때는 피합니다.
+- **GitHub Pages판을 서버에 붙이려면** 저장소 변수 `VITE_API_ORIGIN`에 Worker 주소(예: `https://one-finger-royale.<계정>.workers.dev`)를 넣습니다. 비워 두면 Pages 빌드는 오프라인 전용입니다. 이 경우 Worker의 `ALLOWED_ORIGINS`(`apps/server/wrangler.jsonc`, 쉼표 목록)에 Pages 출처(`https://ring-wdr.github.io`)가 있어야 교차 출처 호출과 WebSocket이 허용됩니다.
+
+## 지연 측정
+
+```bash
+bun run loadtest -- --url http://127.0.0.1:8787 --clients 12 --seconds 60
+```
+
+게스트 12명이 같은 방에 들어가 20Hz로 입력(이동·공격·대시·드래프트)을 보내며, 클라이언트별·전체로 RTT(ping/pong) p50·p95, 스냅샷 간격 p50·p95·p99·최대, 다운/업 KB/s, 초당 스냅샷 수, ack 지연, 종료 코드를 표로 출력합니다. 시작하지 못한 클라이언트가 있으면 0이 아닌 코드로 끝납니다. 배포 서버는 `--url https://…`로 측정합니다.
+
+채택 기준(설계 문서 14절): 국내 모바일 회선에서 RTT 중앙값 40 ms 미만·p95 80 ms 미만, 12명 접속 시 스냅샷(틱) 간격 p99 70 ms 미만. 같은 머신에서 재면 RTT는 의미가 없고 간격만 봅니다. 서버 쪽 값은 Workers Logs의 `match_end` 로그와 교차 확인합니다.
+
 ## 구조
 
 ```
@@ -51,6 +100,12 @@ packages/sim     결정론적 게임 로직 (렌더러·DOM 의존 없음) — �
   bot.ts         봇 AI (사람과 같은 Command만 사용)
   world.ts       createWorld / step(world, commands)
   scripts/balance.ts  헤드리스 밸런스 러너
+packages/net     서버와 클라이언트가 공유하는 프로토콜: 상수·색인 표, 입력/스냅샷 바이너리 코덱, JSON 제어 메시지, HTTP API 타입,
+                 관심 영역(AOI), 이동 예측기, 보간
+packages/meta    점수→코인 보상, 프로필/룬 규칙, 이름 생성 — 클라이언트(오프라인)와 서버 공용
+apps/server      Cloudflare Worker: HTTP API, Lobby·MatchRoom Durable Object, D1 마이그레이션
+  scripts/loadtest.ts  지연 측정 도구 (위 "지연 측정")
+scripts/dev-online.ts  wrangler dev + vite를 함께 띄우는 로컬 온라인 개발
 apps/client      Vite + Three.js + Preact 클라이언트
   app/store.ts   Preact signals: 현재 stage, 메뉴 화면, 결과, 설정·프로필(자동 저장)
   app/gameHost.ts  게임(three.js·sim·HUD)과 모델을 첫 플레이 때만 동적 import + 로딩 화면
@@ -95,9 +150,9 @@ apps/client      Vite + Three.js + Preact 클라이언트
 
 **넷코드 대비**
 - `step(world, commands)`는 시드와 입력이 같으면 결과가 항상 같습니다 (테스트로 보장). 봇도 사람과 똑같은 `Command`를 냅니다.
-- 멀티로 넘어갈 때는 `packages/sim`을 서버(Colyseus 등)가 권위적으로 돌리고, 클라는 같은 패키지로 예측과 보간을 합니다.
+- 멀티플레이에서는 `packages/sim`을 서버(`MatchRoom`)가 권위적으로 돌리고, 클라는 같은 패키지로 예측과 보간을 합니다.
 
 ## 다음 단계
 1. `bun run balance`로 태그별 승률 편차 줄이기 (현재 수호·화염이 강세)
 2. 실제 폰에서 한 손 플레이 테스트: 드래프트 시트, 버튼 위치, 대시 제스처 오인식
-3. 멀티: 서버 권위 룸 + 스냅샷 델타 + 클라 예측
+3. 실제 모바일 회선에서 `bun run loadtest`로 RTT·틱 간격 채택 기준 확인
