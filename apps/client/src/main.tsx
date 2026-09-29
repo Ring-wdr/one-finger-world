@@ -2,6 +2,7 @@ import './style.css';
 import { effect } from '@preact/signals';
 import { render } from 'preact';
 import { disposeGame, gameActions } from './app/gameHost';
+import { initOnline } from './app/online';
 import { stage } from './app/store';
 import { App } from './ui/screens/App';
 
@@ -14,6 +15,8 @@ const disposeStage = effect(() => {
 	app.dataset.stage = stage.value;
 });
 render(<App game={gameActions} />, ui);
+// Not awaited: the menu is usable at once and switches to the server profile when the API answers.
+void initOnline();
 
 if (import.meta.hot)
 	import.meta.hot.dispose(() => {
