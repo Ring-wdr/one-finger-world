@@ -55,12 +55,12 @@ apps/client      Vite + Three.js + Preact 클라이언트
   meta/          점수→코인, 프로필/상점(구매·장착), 설정 — DOM 없는 순수 로직
   audio/         WebAudio 합성 효과음 (에셋 파일 없음)
   input/         InputController (기존 조작법 유지) + 키보드 폴백
-  render/        Renderer (고정 카메라, 틱 보간, 이펙트)
+  render/        Renderer (고정 카메라, 틱 보간, 이펙트), decor.ts: 링별 바닥 장식 배치 (시각 전용, 충돌 없음)
   ui/screens/    Preact 화면: 메인·설정·상점·결과·관전·튜토리얼 완료
   ui/Hud.ts      인게임 HUD (드래프트 카드, 태그 바, 미니맵, 킬피드) — 매 프레임 갱신이라 명령형 DOM 유지
   tutorial/      튜토리얼 디렉터 (DOM 없는 순수 로직, 오토파일럿 테스트로 완주 검증)
   game/          모드 전환(메뉴/본 게임/튜토리얼) + 고정 틱 루프 (20Hz sim, rAF 렌더 보간)
-  blender/       바위·소나무·고목·포션·마법서·화살을 절차적으로 만드는 블렌더 파이썬 스크립트
+  blender/       바위·소나무·고목·바닥 장식·포션·마법서·화살을 절차적으로 만드는 블렌더 파이썬 스크립트
                  (버텍스 컬러 + 레이트레이싱 AO, 텍스처 없음). 캐릭터는 KayKit(CC0) 그대로
 ```
 

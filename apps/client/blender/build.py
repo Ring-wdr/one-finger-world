@@ -18,6 +18,7 @@ import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
 import common  # noqa: E402
+import decor  # noqa: E402
 import items  # noqa: E402
 import nature  # noqa: E402
 
@@ -103,7 +104,7 @@ def main():
     opts = args()
     common.reset_scene()
     only = set(opts['only'].split(',')) if 'only' in opts else None
-    bundles = {'nature.glb': nature.build_all, 'items.glb': items.build_all}
+    bundles = {'nature.glb': lambda: nature.build_all() + decor.build_all(), 'items.glb': items.build_all}
     built = {}
     for bundle, build in bundles.items():
         if only and bundle.split('.')[0] not in only:

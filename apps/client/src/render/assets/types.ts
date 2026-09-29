@@ -1,6 +1,6 @@
 import type * as THREE from 'three';
 
-export const ASSET_KEYS = ['fighter', 'monster1', 'monster2', 'monster3', 'arrow', 'fireball', 'pickup', 'rock', 'tree', 'deadTree'] as const;
+export const ASSET_KEYS = ['fighter', 'monster1', 'monster2', 'monster3', 'arrow', 'fireball', 'pickup', 'rock', 'tree', 'deadTree', 'decor'] as const;
 export type AssetKey = (typeof ASSET_KEYS)[number];
 
 /** Looping states. */

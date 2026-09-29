@@ -80,5 +80,7 @@ export const FALLBACKS: Record<AssetKey, (o: InstanceOptions) => FallbackBuild> 
 	},
 	rock: () => shared(new THREE.Mesh(geo.rock(), mat.rock())),
 	tree: () => shared(new THREE.Mesh(geo.tree(), mat.tree())),
-	deadTree: () => shared(new THREE.Mesh(geo.deadTree(), mat.deadTree()))
+	deadTree: () => shared(new THREE.Mesh(geo.deadTree(), mat.deadTree())),
+	// Decoration is optional: without its models the ground simply stays bare.
+	decor: () => ({ object: new THREE.Group(), glow: [], owned: [] })
 };

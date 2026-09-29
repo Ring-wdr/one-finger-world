@@ -15,6 +15,7 @@ import {
 import { AssetLibrary } from './assets/AssetLibrary';
 import type { ModelInstance } from './assets/ModelInstance';
 import type { AssetKey, InstanceOptions } from './assets/types';
+import { DECOR } from './decor';
 import { castShadows, Lighting } from './lighting';
 import { createTerrain } from './terrain';
 import { glowTexture, Particles } from './vfx';
@@ -273,9 +274,12 @@ export class Renderer {
 	 * Instanced per model and map cell, not per model: an InstancedMesh is culled as a whole, so a
 	 * map-wide one would draw every prop every frame (twice, with the shadow pass). Per cell, the
 	 * camera and shadow frustums drop the cells out of view.
+	 *
+	 * Ground decoration (render/decor.ts) goes through the same path, but casts no shadow: it is
+	 * small and plentiful, and lies in the props' shadows instead.
 	 */
 	private buildProps() {
-		const keys = ['rock', 'tree', 'deadTree'] as const;
+		const keys = ['rock', 'tree', 'deadTree', 'decor'] as const;
 		const variantsOf = (key: AssetKey): (string | undefined)[] => {
 			const vs = this.assets.variants(key);
 			return vs.length ? vs : [undefined];
@@ -293,12 +297,9 @@ export class Renderer {
 		// same props, so what blocks a unit is exactly what is drawn.
 		const placed = new Map<string, { key: AssetKey; variant: string | undefined; matrices: THREE.Matrix4[] }>();
 		const up = new THREE.Vector3(0, 1, 0);
-		for (const p of MAP_PROPS) {
-			const vs = variantsOf(p.kind);
-			const name = PROP_VARIANTS[p.kind][p.variant]?.name;
-			const v = name !== undefined && vs.includes(name) ? name : vs[p.variant % vs.length];
-			const id = `${p.kind}:${v}:${Math.floor(p.x / PROP_CELL)},${Math.floor(p.y / PROP_CELL)}`;
-			const group = placed.get(id) ?? { key: p.kind, variant: v, matrices: [] };
+		const place = (key: AssetKey, variant: string | undefined, p: { x: number; y: number; yaw: number; scale: number }) => {
+			const id = `${key}:${variant}:${Math.floor(p.x / PROP_CELL)},${Math.floor(p.y / PROP_CELL)}`;
+			const group = placed.get(id) ?? { key, variant, matrices: [] };
 			placed.set(id, group);
 			group.matrices.push(
 				new THREE.Matrix4().compose(
@@ -307,13 +308,20 @@ export class Renderer {
 					new THREE.Vector3(p.scale, p.scale, p.scale)
 				)
 			);
+		};
+		for (const p of MAP_PROPS) {
+			const vs = variantsOf(p.kind);
+			const name = PROP_VARIANTS[p.kind][p.variant]?.name;
+			place(p.kind, name !== undefined && vs.includes(name) ? name : vs[p.variant % vs.length], p);
 		}
+		for (const d of DECOR) place('decor', d.variant, d);
 
 		for (const { key, variant, matrices } of placed.values()) {
 			// Parts are cached per model, so every cell shares one geometry and material.
 			for (const part of this.assets.instancedParts(key, variant)) {
 				const mesh = new THREE.InstancedMesh(part.geometry, part.material, matrices.length);
-				mesh.castShadow = true;
+				mesh.castShadow = key !== 'decor';
+				mesh.receiveShadow = key === 'decor';
 				matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
 				// Bounds over this cell's instances only, for culling.
 				mesh.computeBoundingSphere();
