@@ -8,16 +8,22 @@ function allowedOrigins(env: Env): string[] {
 		.filter(Boolean);
 }
 
+/** A single `*` entry admits any origin; only local development sets it (Vite serves the page, the Worker sees its origin). */
+function listed(origin: string, env: Env): boolean {
+	const list = allowedOrigins(env);
+	return list.includes('*') || list.includes(origin);
+}
+
 /** No Origin (non-browser), same origin, or listed in ALLOWED_ORIGINS. */
 export function originAllowed(request: Request, env: Env): boolean {
 	const origin = request.headers.get('Origin');
-	return origin === null || origin === new URL(request.url).origin || allowedOrigins(env).includes(origin);
+	return origin === null || origin === new URL(request.url).origin || listed(origin, env);
 }
 
-/** CORS headers for a cross-origin request from a listed origin; empty otherwise (§7). */
+/** CORS headers for a cross-origin request from a listed origin; empty otherwise (§7). Always echoes the origin, never a literal `*`. */
 export function corsHeaders(request: Request, env: Env): Record<string, string> {
 	const origin = request.headers.get('Origin');
-	if (origin === null || !allowedOrigins(env).includes(origin)) return {};
+	if (origin === null || !listed(origin, env)) return {};
 	return {
 		'Access-Control-Allow-Origin': origin,
 		Vary: 'Origin',

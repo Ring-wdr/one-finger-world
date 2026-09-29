@@ -2,6 +2,7 @@ import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { API, DATA_HASH, PROTOCOL_VERSION, type ApiErrorBody, type GuestResponse, type ProfileResponse, type QuickplayResponse } from '@ofa/net';
 import { signToken, verifyTicket } from '../src/auth';
+import { corsHeaders, originAllowed } from '../src/http';
 
 const ORIGIN = 'http://test';
 const secret = env.AUTH_SECRET;
@@ -218,6 +219,30 @@ describe('CORS', () => {
 		const res = await call(API.health, { headers: { Origin: ORIGIN } });
 		expect(res.status).toBe(200);
 		expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+	});
+});
+
+describe('ALLOWED_ORIGINS=* (local development)', () => {
+	const devEnv = { ALLOWED_ORIGINS: '*' } as Env;
+	const listEnv = { ALLOWED_ORIGINS: 'https://ring-wdr.github.io' } as Env;
+	const from = (origin: string | null) => new Request(`${ORIGIN}/api/health`, origin === null ? {} : { headers: { Origin: origin } });
+
+	it('admits any origin and echoes it instead of a literal *', () => {
+		const request = from('http://192.168.0.7:5173');
+		expect(originAllowed(request, devEnv)).toBe(true);
+		const headers = corsHeaders(request, devEnv);
+		expect(headers['Access-Control-Allow-Origin']).toBe('http://192.168.0.7:5173');
+		expect(headers.Vary).toBe('Origin');
+	});
+
+	it('adds no CORS headers without an Origin', () => {
+		expect(originAllowed(from(null), devEnv)).toBe(true);
+		expect(corsHeaders(from(null), devEnv)).toEqual({});
+	});
+
+	it('does not treat * specially when it is not listed', () => {
+		expect(originAllowed(from('http://192.168.0.7:5173'), listEnv)).toBe(false);
+		expect(corsHeaders(from('http://192.168.0.7:5173'), listEnv)).toEqual({});
 	});
 });
 
