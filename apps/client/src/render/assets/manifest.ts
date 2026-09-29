@@ -1,3 +1,4 @@
+import { DECOR_VARIANTS } from '../decor';
 import type { AssetManifest, ModelSpec } from './types';
 
 /**
@@ -25,7 +26,7 @@ const character = (name: string, extra: Partial<ModelSpec> = {}): ModelSpec => (
  *       monster1: { url: 'models/slime.glb', height: 1.2, clips: { attack: 'Bite' } },
  *       rock: { url: 'models/rock.glb', height: 0.9 },
  *
- * Instanced props (rock, tree, deadTree) should be static meshes; animations are ignored there,
+ * Instanced props (rock, tree, deadTree, decor) should be static meshes; animations are ignored there,
  * and each variant becomes its own InstancedMesh.
  */
 /** A node of the bundled props file. Pivots sit at the base; roots dipping below stay buried. */
@@ -76,6 +77,11 @@ export const MODEL_MANIFEST: AssetManifest = {
 	deadTree: {
 		default: 'medium',
 		variants: Object.fromEntries(['small', 'medium', 'large'].map((v) => [v, prop(`dead_tree_${v}`)]))
+	},
+	// Ground decoration from the same file, scattered by render/decor.ts.
+	decor: {
+		default: 'grass',
+		variants: Object.fromEntries(DECOR_VARIANTS.map((v) => [v, prop(`decor_${v}`)]))
 	},
 
 	// Loot and projectiles, from the same Blender build. A pickup shows its item kind (weapons

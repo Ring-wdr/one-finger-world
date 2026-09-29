@@ -305,6 +305,54 @@ def torus(major, minor, major_segments=16, minor_segments=6):
     return bm
 
 
+def skin(verts, edges, radii, root=0, smoothing=0.6, subdivisions=1, squash=None):
+    """
+    Wraps a skeleton of vertices and edges in a tube whose thickness follows `radii` (Blender's
+    Skin modifier, smoothed by subdivision) — branches, twigs, bones. `squash(i)` scales one
+    radius axis per vertex, for oval cross-sections. Returns a bmesh.
+    """
+    mesh = bpy.data.meshes.new('skel')
+    mesh.from_pydata([tuple(v) for v in verts], edges, [])
+    obj = bpy.data.objects.new('skel', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    mod = obj.modifiers.new('skin', 'SKIN')
+    mod.branch_smoothing = smoothing
+    for i, r in enumerate(radii):
+        mesh.skin_vertices[0].data[i].radius = (r, r * (squash(i) if squash else 1))
+    mesh.skin_vertices[0].data[root].use_root = True
+    if subdivisions:
+        sub = obj.modifiers.new('sub', 'SUBSURF')
+        sub.levels = sub.render_levels = subdivisions
+    deps = bpy.context.evaluated_depsgraph_get()
+    evaluated = bpy.data.meshes.new_from_object(obj.evaluated_get(deps))
+    bpy.data.objects.remove(obj)
+    bpy.data.meshes.remove(mesh)
+    bm = bmesh.new()
+    bm.from_mesh(evaluated)
+    bpy.data.meshes.remove(evaluated)
+    return bm
+
+
+def decimate(bm, target_tris):
+    """Collapses a bmesh down to about `target_tris` triangles, in place."""
+    tris = sum(len(f.verts) - 2 for f in bm.faces)
+    if tris <= target_tris:
+        return
+    mesh = bpy.data.meshes.new('dec')
+    bm.to_mesh(mesh)
+    obj = bpy.data.objects.new('dec', mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    mod = obj.modifiers.new('dec', 'DECIMATE')
+    mod.ratio = target_tris / tris
+    deps = bpy.context.evaluated_depsgraph_get()
+    out = bpy.data.meshes.new_from_object(obj.evaluated_get(deps))
+    bpy.data.objects.remove(obj)
+    bpy.data.meshes.remove(mesh)
+    bm.clear()
+    bm.from_mesh(out)
+    bpy.data.meshes.remove(out)
+
+
 def cut_flat_below(bm, z):
     """Slices everything under z off and caps the hole — a flat base that sits on the ground."""
     geom = list(bm.verts) + list(bm.edges) + list(bm.faces)

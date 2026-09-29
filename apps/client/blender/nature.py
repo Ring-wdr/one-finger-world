@@ -10,10 +10,9 @@ import math
 import random
 
 import bmesh
-import bpy
 from mathutils import Matrix, Vector
 
-from common import Builder, cut_flat_below, fbm, lathe, material, mix, rotation, smoothstep, srgb
+from common import Builder, cut_flat_below, decimate, fbm, lathe, material, mix, rotation, skin, smoothstep, srgb
 
 # Rock name → (footprint, height). Footprints are PROP_VARIANTS.rock.
 ROCKS = {
@@ -38,7 +37,7 @@ def _jitter(i, seed=0):
 # Rocks
 
 
-def _boulder(rng, points, stretch, cuts=3):
+def boulder(rng, points, stretch, cuts=3):
     """
     A chiselled boulder: the convex hull of points scattered over a squashed sphere gives big
     flat facets, and a few deep planar cuts break the symmetry into ledges.
@@ -68,7 +67,7 @@ def _boulder(rng, points, stretch, cuts=3):
     return bm
 
 
-def _chamfer(bm, width, rng):
+def chamfer(bm, width, rng):
     """Bevels every hard edge so it catches a rim of light, then roughens the surface a touch."""
     bm.normal_update()
     hard = [e for e in bm.edges if len(e.link_faces) == 2 and e.calc_face_angle(0) > math.radians(18)]
@@ -79,7 +78,7 @@ def _chamfer(bm, width, rng):
             v.co += Vector((fbm(v.co * 5 + off), fbm(v.co * 5 + off + Vector((7, 0, 0))), fbm(v.co * 5 + off + Vector((0, 7, 0))))) * width * 0.35
 
 
-def _fit(bm, footprint, height, bury=0.06):
+def fit_rock(bm, footprint, height, bury=0.06):
     """Flat base slightly below ground, centred, with the farthest vertex exactly `footprint` out."""
     zmin = min(v.co.z for v in bm.verts)
     zmax = max(v.co.z for v in bm.verts)
@@ -145,11 +144,11 @@ def rock(name):
     }[name]
     for k, (dx, dy, fp, h, stretch, tilt) in enumerate(chunks):
         crng = random.Random(seed * 13 + k)
-        bm = _boulder(crng, 34 if k == 0 else 24, stretch, cuts=5 if k == 0 else 3)
+        bm = boulder(crng, 34 if k == 0 else 24, stretch, cuts=5 if k == 0 else 3)
         if tilt:
             bmesh.ops.transform(bm, matrix=rotation('Y', tilt), verts=bm.verts)
-        _fit(bm, fp, h)
-        _chamfer(bm, 0.045 if k == 0 else 0.03, crng)
+        fit_rock(bm, fp, h)
+        chamfer(bm, 0.045 if k == 0 else 0.03, crng)
         spin = Matrix.Translation((dx, dy, 0)) @ rotation('Z', crng.uniform(0, 360))
         b.add(bm, mat, _rock_painter(height, seed + k), spin)
     obj = b.finish(name, ao=dict(samples=48, distance=0.5, strength=0.7), sharp_angle=40)
@@ -371,26 +370,7 @@ def dead_tree(name):
     seed = sum(map(ord, name)) * 3
     rng = random.Random(seed)
     verts, edges, radii = _branch_graph(rng, spec)
-    mesh = bpy.data.meshes.new(name + '_skel')
-    mesh.from_pydata([tuple(v) for v in verts], edges, [])
-    obj = bpy.data.objects.new(name + '_skel', mesh)
-    bpy.context.scene.collection.objects.link(obj)
-    skin = obj.modifiers.new('skin', 'SKIN')
-    skin.branch_smoothing = 0.6
-    for i, r in enumerate(radii):
-        mesh.skin_vertices[0].data[i].radius = (r, r * rng.uniform(0.85, 1.0))
-    mesh.skin_vertices[0].data[0].use_root = True
-    sub = obj.modifiers.new('sub', 'SUBSURF')
-    sub.levels = 1
-    sub.render_levels = 1
-    deps = bpy.context.evaluated_depsgraph_get()
-    evaluated = bpy.data.meshes.new_from_object(obj.evaluated_get(deps))
-    bpy.data.objects.remove(obj)
-    bpy.data.meshes.remove(mesh)
-
-    bm = bmesh.new()
-    bm.from_mesh(evaluated)
-    bpy.data.meshes.remove(evaluated)
+    bm = skin(verts, edges, radii, squash=lambda i: rng.uniform(0.85, 1.0))
     # Gnarled bark: displace along normals.
     off = Vector((seed, 0, 0))
     bm.normal_update()
@@ -398,7 +378,7 @@ def dead_tree(name):
         v.co += v.normal * fbm(v.co * 7 + off) * 0.022
     bmesh.ops.triangulate(bm, faces=bm.faces)
     target = {'dead_tree_small': 900, 'dead_tree_medium': 1300, 'dead_tree_large': 1700}[name]
-    _decimate(bm, target)
+    decimate(bm, target)
 
     wood = srgb(0x655A51)
     wood_dark = srgb(0x3A322C)
@@ -417,25 +397,6 @@ def dead_tree(name):
     b = Builder()
     b.add(bm, nature_material(), paint)
     return b.finish(name, ao=dict(samples=36, distance=0.7, strength=0.6), sharp_angle=None)
-
-
-def _decimate(bm, target_tris):
-    tris = len(bm.faces)
-    if tris <= target_tris:
-        return
-    mesh = bpy.data.meshes.new('dec')
-    bm.to_mesh(mesh)
-    obj = bpy.data.objects.new('dec', mesh)
-    bpy.context.scene.collection.objects.link(obj)
-    mod = obj.modifiers.new('dec', 'DECIMATE')
-    mod.ratio = target_tris / tris
-    deps = bpy.context.evaluated_depsgraph_get()
-    out = bpy.data.meshes.new_from_object(obj.evaluated_get(deps))
-    bpy.data.objects.remove(obj)
-    bpy.data.meshes.remove(mesh)
-    bm.clear()
-    bm.from_mesh(out)
-    bpy.data.meshes.remove(out)
 
 
 def build_all():
