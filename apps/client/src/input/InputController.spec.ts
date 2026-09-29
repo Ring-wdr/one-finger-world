@@ -414,6 +414,28 @@ describe('InputController', () => {
 		]);
 	});
 
+	it('marks a double flick as touch only when both flicks are touch', () => {
+		const flick = (target: FakePointerSurface, t: number, first: string, second: string) => {
+			target.fire('pointerdown', { pointerType: first, clientX: 0, clientY: 0, timeStamp: t });
+			target.fire('pointermove', { pointerType: first, clientX: 80, clientY: 0, timeStamp: t + 60 });
+			target.fire('pointerup', { pointerType: first, clientX: 80, clientY: 0, timeStamp: t + 80 });
+			target.fire('pointerdown', { pointerType: second, clientX: 0, clientY: 0, timeStamp: t + 260 });
+			target.fire('pointermove', { pointerType: second, clientX: 80, clientY: 0, timeStamp: t + 320 });
+			target.fire('pointerup', { pointerType: second, clientX: 80, clientY: 0, timeStamp: t + 340 });
+		};
+		const dashes = (first: string, second: string) => {
+			const { target, gestures } = setup();
+			flick(target, 0, first, second);
+			return gestures.filter((g) => g.type === 'dash');
+		};
+
+		expect(dashes('touch', 'touch')).toEqual([{ type: 'dash', direction: { x: 1, y: 0 }, touch: true }]);
+		expect(dashes('pen', 'pen')).toEqual([{ type: 'dash', direction: { x: 1, y: 0 }, touch: true }]);
+		expect(dashes('mouse', 'mouse')[0]).not.toHaveProperty('touch');
+		expect(dashes('mouse', 'touch')[0]).not.toHaveProperty('touch');
+		expect(dashes('touch', 'mouse')[0]).not.toHaveProperty('touch');
+	});
+
 	it('uses custom fast drag speed for the existing double-drag dash', () => {
 		const { target, gestures } = setup({
 			tapMs: 180,

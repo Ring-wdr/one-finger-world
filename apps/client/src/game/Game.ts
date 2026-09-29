@@ -253,7 +253,7 @@ export class Game implements StageHost, GameActions {
 				this.pending.push({ type: 'attack' });
 				break;
 			case 'dash':
-				this.pending.push({ type: 'dash', dir: g.direction });
+				this.pending.push({ type: 'dash', dir: g.direction, touch: g.touch === true });
 				break;
 			case 'skill':
 				// Disabled via options; skills auto-cast in the sim.

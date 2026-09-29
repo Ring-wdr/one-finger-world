@@ -416,7 +416,7 @@ export class Hud {
 		e.levelBtn.classList.toggle('pulse', pending > 0 && !this.draftOpen);
 		e.levelBtn.toggleAttribute('disabled', pending === 0 || !me.alive);
 		setText(e.levelBtn, !me.build.weapon && me.offer ? '무기 선택' : pending > 0 ? `레벨업 ×${pending}` : '레벨업');
-		e.dashCd.style.setProperty('--k', `${Math.max(0, Math.min(1, 1 - me.dashCd / 3))}`);
+		e.dashCd.style.setProperty('--k', `${Math.max(0, Math.min(1, 1 - me.dashCd / me.dashCdMax))}`);
 		e.dashCd.classList.toggle('ready', me.dashCd <= 0);
 
 		const tagKey = TAGS.map((t) => me.build.tagCounts[t]).join();

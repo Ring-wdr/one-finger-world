@@ -16,6 +16,14 @@ import { add, clampToCircle, copy, dist, dist2, dot, normalize, rotate, scale, s
 
 export const DASH_TIME = 0.18;
 export const DASH_DISTANCE = 6;
+export const DASH_COOLDOWN = 3;
+/**
+ * A touch dash is a double flick that also stops the run, so it's much harder to land on
+ * time than a key press; its cooldown is scaled down to make up for that.
+ */
+export const TOUCH_DASH_CD_SCALE = 0.65;
+/** No build or input gets dashes (and their i-frames) closer together than this. */
+export const DASH_CD_FLOOR = 0.7;
 export const COMBO_MULT = [1, 1.1, 1.6] as const;
 export const COMBO_WINDOW = 1.1;
 const MELEE_ARC = 2.4;
@@ -267,7 +275,12 @@ function explode(world: World, src: Fighter, at: Vec2, radius: number, amount: n
 
 // ── Fighter actions
 
-export function startDash(world: World, f: Fighter, dir: Vec2) {
+export function dashCooldown(f: Fighter, touch: boolean) {
+	const cd = DASH_COOLDOWN * (f.build.tiers.speed >= 1 ? 0.6 : 1) * (1 - f.build.stats.cdr);
+	return Math.max(DASH_CD_FLOOR, cd * (touch ? TOUCH_DASH_CD_SCALE : 1));
+}
+
+export function startDash(world: World, f: Fighter, dir: Vec2, touch = false) {
 	if (f.dashCd > 0 || f.dashTime > 0 || f.rootTime > 0) return;
 	const d = normalize(dir);
 	f.dashDir = d.x === 0 && d.y === 0 ? copy(f.facing) : d;
@@ -275,7 +288,7 @@ export function startDash(world: World, f: Fighter, dir: Vec2) {
 	f.dashTime = DASH_TIME;
 	f.dashHit = [];
 	f.attackQueued = 0;
-	f.dashCd = 3 * (f.build.tiers.speed >= 1 ? 0.6 : 1) * (1 - f.build.stats.cdr);
+	f.dashCd = f.dashCdMax = dashCooldown(f, touch);
 	world.events.push({
 		type: 'dash',
 		unit: f.id,

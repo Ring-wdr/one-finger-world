@@ -22,7 +22,8 @@ export interface SkillButtonFeedback {
 export type InputGesture =
 	| { type: 'attack'; comboStep: ComboStep }
 	| { type: 'move'; mode: MoveMode; direction: Direction2 }
-	| { type: 'dash'; direction: Direction2 }
+	/** `touch`: both flicks were made by finger/stylus, so the sim eases the cooldown. */
+	| { type: 'dash'; direction: Direction2; touch?: true }
 	| { type: 'skill'; slot: SkillSlot }
 	| { type: 'idle' };
 
