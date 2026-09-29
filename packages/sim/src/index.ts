@@ -45,10 +45,13 @@ export {
 	applyCommand,
 	runHeadless,
 	spawnFighter,
+	newBotBrain,
+	setBotControl,
 	equip,
 	START_REROLLS,
 	ATTACK_BUFFER_TIME,
 	WALK_SPEED_FACTOR,
+	type HumanSeat,
 	type WorldOptions,
 	type SpawnFighterOptions
 } from './world';
