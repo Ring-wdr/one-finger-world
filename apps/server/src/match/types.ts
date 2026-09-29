@@ -119,6 +119,8 @@ export interface MatchMeta {
 	seats: Seat[];
 	/** Consecutive tick failures after restores. */
 	crashes: number;
+	/** Times the running match was restored from a checkpoint (deploys, evictions, crashes). */
+	restores: number;
 	aborted: boolean;
 }
 
