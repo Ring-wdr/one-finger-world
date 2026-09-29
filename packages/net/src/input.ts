@@ -1,6 +1,6 @@
 import type { Command, Vec2 } from '@ofa/sim';
-import { DIR_SCALE } from './constants';
-import { todo } from './todo';
+import { DIR_SCALE, MsgType } from './constants';
+import { Reader, Writer, clamp } from './wire';
 
 /**
  * Client → server input frames (docs/multiplayer-server-design.md §10.3), 12 bytes:
@@ -64,18 +64,60 @@ export function frameToCommands(f: InputFrame): Command[] {
 	return cmds;
 }
 
+const dirToWire = (v: number): number => clamp(Math.round(v * DIR_SCALE), -DIR_SCALE, DIR_SCALE);
+
 export function encodeInput(f: InputFrame): Uint8Array {
-	return todo('T3', f);
+	let flags = 0;
+	if (f.move) flags |= InputFlag.Move;
+	if (f.run) flags |= InputFlag.Run;
+	if (f.attack) flags |= InputFlag.Attack;
+	if (f.dash) flags |= InputFlag.Dash;
+	if (f.dashTouch) flags |= InputFlag.DashTouch;
+	if (f.draft !== null) flags |= InputFlag.Draft;
+	if (f.reroll) flags |= InputFlag.Reroll;
+	if (f.exchange !== null) flags |= InputFlag.Exchange;
+	const w = new Writer();
+	w.u8(MsgType.Input);
+	w.u32(f.seq);
+	w.u8(flags);
+	w.i8(f.move ? dirToWire(f.move.x) : 0);
+	w.i8(f.move ? dirToWire(f.move.y) : 0);
+	w.i8(f.dash ? dirToWire(f.dash.x) : 0);
+	w.i8(f.dash ? dirToWire(f.dash.y) : 0);
+	w.u8(f.draft === null ? 0 : clamp(f.draft, 0, 255));
+	w.u8(f.exchange === null ? 0 : clamp(f.exchange, 0, 255));
+	return w.finish();
 }
 
 /** Null when the frame is malformed (wrong length or type, seq 0). Bad indices only drop that input. */
 export function decodeInput(data: ArrayBuffer | Uint8Array): InputFrame | null {
-	return todo('T3', data);
+	const r = new Reader(data);
+	if (r.length !== INPUT_FRAME_BYTES || r.u8() !== MsgType.Input) return null;
+	const seq = r.u32();
+	if (seq < 1) return null;
+	const flags = r.u8();
+	const mx = r.i8();
+	const my = r.i8();
+	const dx = r.i8();
+	const dy = r.i8();
+	const draft = r.u8();
+	const exchange = r.u8();
+	return {
+		seq,
+		move: flags & InputFlag.Move && (mx !== 0 || my !== 0) ? { x: mx / DIR_SCALE, y: my / DIR_SCALE } : null,
+		run: (flags & InputFlag.Run) !== 0,
+		attack: (flags & InputFlag.Attack) !== 0,
+		dash: flags & InputFlag.Dash ? { x: dx / DIR_SCALE, y: dy / DIR_SCALE } : null,
+		dashTouch: (flags & InputFlag.DashTouch) !== 0,
+		draft: flags & InputFlag.Draft && draft <= MAX_DRAFT_INDEX ? draft : null,
+		reroll: (flags & InputFlag.Reroll) !== 0,
+		exchange: flags & InputFlag.Exchange && exchange <= MAX_EXCHANGE_INDEX ? exchange : null
+	};
 }
 
 /** Whether a frame carries anything besides movement. */
 export function hasOneShots(f: InputFrame): boolean {
-	return todo('T3', f);
+	return f.attack || f.dash !== null || f.draft !== null || f.reroll || f.exchange !== null;
 }
 
 /**
@@ -83,5 +125,12 @@ export function hasOneShots(f: InputFrame): boolean {
  * `into` unless `into` already has an input of that kind.
  */
 export function mergeOneShots(into: InputFrame, from: InputFrame): void {
-	todo('T3', into, from);
+	into.attack ||= from.attack;
+	into.reroll ||= from.reroll;
+	if (into.dash === null && from.dash !== null) {
+		into.dash = from.dash;
+		into.dashTouch = from.dashTouch;
+	}
+	if (into.draft === null) into.draft = from.draft;
+	if (into.exchange === null) into.exchange = from.exchange;
 }
