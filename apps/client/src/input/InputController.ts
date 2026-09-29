@@ -28,7 +28,7 @@ export interface InputThresholds {
 const DEFAULT_THRESHOLDS: InputThresholds = {
 	tapMs: 180,
 	dragStartPx: 14,
-	runDistancePx: 72,
+	runDistancePx: 52,
 	fastDragPxPerMs: 0.9,
 	dashWindowMs: 320
 };
