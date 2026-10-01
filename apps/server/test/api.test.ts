@@ -254,4 +254,29 @@ describe('rate limiting', () => {
 		expect(statuses.slice(0, 30).every((s) => s === 200)).toBe(true);
 		expect(statuses.slice(30)).toContain(429);
 	});
+
+	it('rejects profile writes over the per-guest limit with 429', async () => {
+		const { token } = await newGuest();
+		const statuses: number[] = [];
+		for (let i = 0; i < 32; i++) statuses.push((await post(API.name, token, { name: `name${i}` })).status);
+		expect(statuses.slice(0, 30).every((s) => s === 200)).toBe(true);
+		expect(statuses.slice(30)).toContain(429);
+	});
+});
+
+describe('request bodies', () => {
+	it('stops reading a streamed body without Content-Length past the cap', async () => {
+		const { token } = await newGuest();
+		const chunk = new TextEncoder().encode('x'.repeat(1024));
+		let sent = 0;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (sent++ < 64) controller.enqueue(chunk);
+				else controller.close();
+			}
+		});
+		const res = await exports.default.fetch(`${ORIGIN}${API.name}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body, duplex: 'half' } as RequestInit);
+		expect(res.status).toBe(400);
+		expect(sent).toBeLessThan(64);
+	});
 });

@@ -58,15 +58,13 @@ bun run dev:online     # http://localhost:5173 을 엽니다
 
 ## 배포
 
-**첫 배포**는 wrangler에 로그인된 로컬 머신에서 합니다 (설계 문서 16.2).
+**온라인판: https://one-finger-royale.akswnd55.workers.dev** (첫 배포 2026-10-01). D1 `one-finger-royale`은 첫 배포가 만들었고 ID를 `wrangler.jsonc`에 고정해 두었습니다. 새 계정에 다시 세우는 절차는 설계 문서 16.2에 있습니다.
+
+로컬에서 배포할 때(wrangler 로그인 필요):
 
 ```bash
-cd apps/server
-npx wrangler secret put AUTH_SECRET     # openssl rand -base64 48 값을 붙여 넣기
-cd ../..
-bun run deploy                          # 클라이언트 빌드 → wrangler deploy (D1이 만들어지고 ID가 wrangler.jsonc에 기록됨)
-bun run db:migrate:remote               # 원격 D1에 스키마
-git add apps/server/wrangler.jsonc && git commit -m "chore(server): record the D1 database id"
+bun run db:migrate:remote               # 새 마이그레이션이 있으면 먼저
+bun run deploy                          # 클라이언트 빌드 → wrangler deploy
 ```
 
 - 그 뒤에는 GitHub Actions의 **Deploy to Cloudflare**(`.github/workflows/deploy-cloudflare.yml`)를 수동 실행하면 타입체크·테스트·빌드·원격 마이그레이션·배포까지 합니다. 저장소 비밀 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 필요합니다.

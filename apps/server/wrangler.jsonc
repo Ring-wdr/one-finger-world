@@ -32,7 +32,9 @@
 	],
 	"ratelimits": [
 		{ "name": "GUEST_LIMITER", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
-		{ "name": "PLAY_LIMITER", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } }
+		{ "name": "PLAY_LIMITER", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } },
+		// Profile writes (rename, shop) per guest: each one is a D1 write.
+		{ "name": "ACCOUNT_LIMITER", "namespace_id": "1003", "simple": { "limit": 30, "period": 60 } }
 	],
 	"vars": {
 		// Where new match rooms and the lobby are placed: Japan/Korea.

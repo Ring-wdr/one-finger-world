@@ -2,9 +2,9 @@ name: Deploy to Cloudflare
 
 # Manual only: builds the client and deploys the Worker (API, Durable Objects, static assets) plus D1 migrations.
 #
-# The FIRST deploy must be done locally (docs/multiplayer-server-design.md §16.2): it creates the D1
-# database and writes its id into apps/server/wrangler.jsonc, which this workflow needs (commit that
-# change first). AUTH_SECRET is set once with `wrangler secret put AUTH_SECRET`, not by this workflow.
+# The FIRST deploy was done locally (docs/multiplayer-server-design.md §16.2): it created the D1
+# database, whose id is pinned in apps/server/wrangler.jsonc. AUTH_SECRET was uploaded with that deploy
+# and persists across versions; this workflow never sets it.
 # Repository secrets required: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID.
 on:
   workflow_dispatch:
