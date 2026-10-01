@@ -1,0 +1,26 @@
+# systemd unit for the standalone match server (docs/match-server-oracle.md §4.4). Installed by provision.sh.
+[Unit]
+Description=One Finger Royale match server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ofa
+Group=ofa
+EnvironmentFile=/etc/ofa-match.env
+WorkingDirectory=/opt/ofa-match/current
+ExecStart=/usr/local/bin/bun /opt/ofa-match/current/server.js
+# SIGTERM: every running room checkpoints and closes its sockets with 1012 (§6.4).
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=always
+RestartSec=1
+# Hardening: the process only writes its data directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/ofa-match/data
+
+[Install]
+WantedBy=multi-user.target
