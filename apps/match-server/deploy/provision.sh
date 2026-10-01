@@ -18,7 +18,9 @@ command -v netfilter-persistent >/dev/null && netfilter-persistent save
 rm -f /etc/apt/sources.list.d/caddy-stable.list
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq caddy unzip curl unattended-upgrades >/dev/null
+apt-get install -y -qq caddy unzip curl unattended-upgrades fail2ban >/dev/null
+# SSH is open to the internet for CI deploys (key-only auth); fail2ban bans brute-force sources.
+systemctl enable --now fail2ban >/dev/null 2>&1
 
 # Bun, pinned to the CI version, system-wide.
 if [ "$(/usr/local/bin/bun --version 2>/dev/null)" != "$BUN_VERSION" ]; then
