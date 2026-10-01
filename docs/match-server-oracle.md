@@ -50,8 +50,8 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 홈 리전 | `ap-seoul-1`(서울). 서울에 용량이 없으면 `ap-chuncheon-1`(춘천). **무료 계정은 가입할 때 고른 홈 리전에서만 무료**입니다 |
-| 형태 | `VM.Standard.A1.Flex` (Ampere ARM), **2 OCPU / 12 GB**. 2026-06부터 무료 한도가 4/24에서 2/12로 줄었습니다 |
+| 홈 리전 | **`ap-chuncheon-1`(춘천)**. 이 계정의 홈 리전이고, 홈 리전은 바꿀 수 없습니다. Always Free 컴퓨트는 홈 리전에서만 무료입니다. 춘천과 서울의 RTT 차이는 국내 기준 1~3 ms입니다 |
+| 형태 | 목표는 `VM.Standard.A1.Flex` (Ampere ARM) **2 OCPU / 12 GB**입니다(2026-06부터 무료 한도가 4/24에서 2/12로 줄었습니다). **2026-10-01 확인 결과 이 계정의 A1 한도는 0**이라, 지금 무료로 만들 수 있는 건 `VM.Standard.E2.1.Micro`(AMD, 1/8 OCPU, 1 GB) 2대뿐입니다. 종량제 전환 후 A1 한도가 생기는지 확인해야 합니다. Micro로 충분한지는 §12의 4단계 부하 테스트로 판단합니다 |
 | OS | Ubuntu 24.04 (aarch64). Bun은 linux-arm64를 지원합니다 |
 | 디스크 | 부트 볼륨 50 GB (무료 블록 스토리지 200 GB 안) |
 | 공인 IP | 예약 공인 IP 1개(무료). 인스턴스를 다시 만들어도 DNS를 바꾸지 않아도 됩니다 |
@@ -89,6 +89,7 @@
 /etc/systemd/system/ofa-match.service
 ```
 
+- **Caddy 설치**: Caddy 공식 apt 저장소(cloudsmith)는 2026-10-01 기준 서명 키가 만료되어 설치가 실패합니다. Ubuntu 기본 저장소의 `caddy` 패키지(2.6.2)를 씁니다.
 - **Caddyfile**: `match.<도메인> { reverse_proxy 127.0.0.1:8080 }`. WebSocket 업그레이드는 Caddy가 자동으로 넘깁니다.
 - **systemd**:
   - `User=ofa`(전용 계정), `Restart=always`, `EnvironmentFile=/etc/ofa-match.env`.
@@ -99,6 +100,17 @@
   - `unattended-upgrades`로 보안 패치를 자동 적용합니다.
   - Bun 버전은 저장소의 CI 버전(`1.3.12`)과 같게 고정합니다.
 - **로그**: 매치 서버는 기존과 같은 구조화 JSON(`match_end` 등)을 stdout에 씁니다. journald에서 `journalctl -u ofa-match -o cat | jq`로 조회합니다.
+
+### 4.5 0단계 측정 결과 (2026-10-01)
+
+| 항목 | 값 |
+| --- | --- |
+| 인스턴스 | `ofa-match-spike`, E2.1.Micro, Ubuntu 24.04, 컴파트먼트 `ofa-match`, 공인 IP 138.2.124.85 |
+| 구성 | Caddy(`138.2.124.85.sslip.io`, Let's Encrypt) → Bun 핑 서버 |
+| 집 유선(KT 계열 추정) → 춘천 | TCP 연결 9 ms, WebSocket RTT p50 4.1 / p95 4.7 / p99 10.5 ms |
+| 같은 회선 → Cloudflare Worker | SJC 거점, TCP 연결 140 ms, WebSocket RTT p50 241 ms |
+
+모바일 3사 측정은 남아 있습니다. 브라우저로 `https://138.2.124.85.sslip.io/`에 접속해 측정합니다.
 
 ## 5. 코드 구조 변경
 
