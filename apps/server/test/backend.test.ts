@@ -15,7 +15,9 @@ const setBackend = async (value: 'do' | 'server') => {
 afterEach(() => setBackend('do'));
 
 /** The Worker with MATCH_SERVER_ORIGIN set, as production will have once the match server exists. */
-const withServer = (request: Request) => worker.fetch(request as Parameters<typeof worker.fetch>[0], { ...env, MATCH_SERVER_ORIGIN: SERVER } as Env);
+const withOrigin = (origin: string) => (request: Request) => worker.fetch(request as Parameters<typeof worker.fetch>[0], { ...env, MATCH_SERVER_ORIGIN: origin } as Env);
+const withServer = withOrigin(SERVER);
+const withoutServer = withOrigin('');
 
 async function newGuest(): Promise<GuestResponse> {
 	const res = await exports.default.fetch(`http://test${API.guest}`, { method: 'POST', headers: { 'CF-Connecting-IP': `ip-${crypto.randomUUID()}` } });
@@ -29,9 +31,9 @@ describe('match backend switch', () => {
 	it('stays on Durable Objects until the match server origin is configured', async () => {
 		await setBackend('server');
 		const g = await newGuest();
-		const q = await (await quickplay(g.token)).json<QuickplayResponse>();
+		const q = await (await quickplay(g.token, withoutServer)).json<QuickplayResponse>();
 		expect(q.server).toBeUndefined();
-		expect((await (await exports.default.fetch('http://test/api/health')).json<HealthResponse>()).matchBackend).toBe('do');
+		expect((await (await withoutServer(new Request('http://test/api/health'))).json<HealthResponse>()).matchBackend).toBe('do');
 	});
 
 	it('sends players to the match server, then back to a fresh DO room when switched back', async () => {
