@@ -44,6 +44,7 @@ export const Close = {
 	Ended: 4004,
 	BadSeat: 4005,
 	Version: 4006,
+	Flood: 4007,
 	ServerError: 4010
 } as const;
 export type CloseCode = (typeof Close)[keyof typeof Close];

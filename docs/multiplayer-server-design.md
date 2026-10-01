@@ -26,7 +26,7 @@ Cloudflare 기능 선택의 근거는 `cloudflare/cloudflare-docs` 저장소(202
 | 매치메이킹 | 단일 **Lobby DO** (`getByName('lobby')`) + RPC | 인구가 적을 때도 15초 창 안의 사람들을 한 매치로 묶습니다. 요청은 빠른 매치 1회당 RPC 1건이라 DO 처리량 한도보다 수백 배 낮습니다. 전역 싱글톤 경고(`rules-of-durable-objects`)는 처리량 문제이므로 샤딩 경로를 18절에 둡니다. | 시간 버킷 이름(`match:{15초 구간}`)은 싱글톤이 없지만 저인구에서 묶임이 나쁩니다. KV는 결과적 일관성이라 부적합합니다. |
 | 틱 루프 | 매치 진행 중 DO 안의 `setTimeout` 드리프트 보정 루프 | 진행 중인 DO는 어차피 메모리에 있어야 합니다. 알람은 ms 단위지만 유지보수 시 최대 1분 지연될 수 있고 호출마다 과금됩니다 (`api/alarms`, `rules`의 "Only schedule alarms when there is work to do"). | 틱마다 알람 |
 | 배포·장애 복구 | 2초마다 체크포인트(`storage.put(..., { allowUnconfirmed: true })`) + 5초 워치독 알람 | 배포하면 모든 DO가 재시작되고 WebSocket이 끊깁니다 (`best-practices/websockets`, `concepts/durable-object-lifecycle`). 종료 훅은 없으니 상태를 계속 기록해야 합니다 (`working-without-shutdown-hooks`). 출력 게이트는 쓰기 확정까지 나가는 메시지를 붙잡으므로 `allowUnconfirmed`로 스냅샷 전송이 막히지 않게 합니다 (`api-async-kv-legacy`의 `allowUnconfirmed`). SQLite 백엔드는 키+값 2 MB까지라 월드(약 100 KB)를 그대로 저장합니다 (`platform/limits`). | 체크포인트 없음(배포마다 진행 중 매치가 모두 사라짐) |
-| 계정·프로필·경제 | **D1** (`players`, `matches`, `match_results`) | 사용자 간 조회(리더보드)와 관리 도구, 마이그레이션, Time Travel 백업이 있습니다. `batch()`는 SQL 트랜잭션이라 한 문장이 실패하면 전체가 롤백되고, 이를 이용해 보상 지급을 멱등하게 만듭니다 (`d1/worker-api/d1-database`). `database_id` 없이 바인딩하면 첫 `wrangler deploy`가 DB를 만들고 ID를 설정에 기록합니다 (`wrangler/configuration`의 Automatic provisioning). | 사용자별 DO(사용자 간 조회 불가), KV(결과적 일관성) |
+| 계정·프로필·경제 | **D1** (`players`, `matches`, `match_results`) | 사용자 간 조회(리더보드)와 관리 도구, 마이그레이션, Time Travel 백업이 있습니다. `batch()`는 SQL 트랜잭션이라 한 문장이 실패하면 전체가 롤백되고, 이를 이용해 보상 지급을 멱등하게 만듭니다 (`d1/worker-api/d1-database`). `database_id` 없이 바인딩하면 첫 `wrangler deploy`가 DB를 만듭니다 (`wrangler/configuration`의 Automatic provisioning). ID는 설정에 직접 고정합니다(16.2). | 사용자별 DO(사용자 간 조회 불가), KV(결과적 일관성) |
 | 인증 | 게스트 계정 + HMAC-SHA256 서명 토큰(Web Crypto), 비밀은 `wrangler secret` | Cloudflare에는 최종 사용자 인증 제품이 없습니다(Access는 조직 구성원용). `secrets.required`로 배포 시 누락을 막습니다 (changelog 2026-03-25). | Cloudflare Access, Turnstile(가입 남용이 생기면 추가) |
 | 남용 방지 | **Rate Limiting 바인딩** (`ratelimits`) | 위치별 카운터를 Worker에서 바로 씁니다 (`runtime-apis/bindings/rate-limit`). | 전역 레이트 리밋 DO(문서가 명시한 안티패턴) |
 | 관측 | **Workers Logs** (`observability.enabled`) + 구조화 JSON 로그 | 추가 비용 없이 필드로 조회합니다. 보존 7일 (`observability/logs/workers-logs`). | Analytics Engine(지표가 늘면 추가) |
@@ -328,6 +328,7 @@ after = SELECT coins, best FROM players WHERE id = ?
 | 4004 | Ended | 끝났거나 정리된 매치 |
 | 4005 | BadSeat | 좌석 정보 누락·형식 오류 |
 | 4006 | Version | 프로토콜 또는 데이터 해시 불일치 |
+| 4007 | Flood | 연결의 메시지가 한도(초당 40개, 순간 100개)를 넘음. 클라이언트는 재접속하지 않습니다 |
 | 4010 | ServerError | 복구 불가 오류(`aborted`) |
 
 ### 10.3 입력 프레임 (클라이언트 → 서버, 바이너리 12바이트)
@@ -551,14 +552,15 @@ bun run dev:online   # wrangler dev(8787) + vite(5173, /api 프록시) → http:
 ### 16.2 첫 배포 (wrangler가 로그인된 로컬 머신에서)
 
 ```bash
+bun run build
 cd apps/server
-npx wrangler secret put AUTH_SECRET          # openssl rand -base64 48 값을 붙여 넣기
-cd ../..
-bun run deploy                               # 클라이언트 빌드 → wrangler deploy (D1 자동 생성, ID가 wrangler.jsonc에 기록됨)
-bun run db:migrate:remote                    # 원격 D1에 스키마
-git add apps/server/wrangler.jsonc && git commit -m "chore(server): record the D1 database id"
+# secrets.json = {"AUTH_SECRET":"<openssl rand -base64 48>"}; 배포 후 지우고 값은 비밀번호 관리자에 보관
+npx wrangler deploy --secrets-file secrets.json   # D1 자동 생성
+npx wrangler d1 migrations apply DB --remote       # 원격 D1에 스키마
 ```
 
+- wrangler 4.143은 자동 생성한 D1의 ID를 설정에 다시 쓰지 않습니다. 출력된 ID를 `wrangler.jsonc`의 `database_id`에 직접 적고 커밋해야 CI 배포가 같은 DB에 붙습니다. 2026-10-01 첫 배포에서 그렇게 했습니다.
+- `AUTH_SECRET`은 게스트 계정의 유일한 자격 증명(토큰 서명 키)입니다. 바꾸거나 잃으면 모든 게스트 계정이 고아가 되므로 따로 보관합니다.
 - 첫 배포 직후 마이그레이션 전까지 약 1분간 API가 테이블 없음 오류를 냅니다. 공개 전이라 문제되지 않습니다.
 - `secrets.required`에 `AUTH_SECRET`이 있어 비밀 없이 배포하면 실패합니다.
 - 배포하면 진행 중 매치의 소켓이 끊기고 체크포인트에서 이어집니다(최대 2초 되돌아감). 사람이 많을 때는 배포를 피합니다.
@@ -566,7 +568,7 @@ git add apps/server/wrangler.jsonc && git commit -m "chore(server): record the D
 ### 16.3 CI
 
 - 기존 `deploy-pages.yml`은 그대로 타입체크·테스트 후 GitHub Pages에 오프라인판을 배포합니다. 저장소 변수 `VITE_API_ORIGIN`을 두면 Pages판도 Worker에 교차 출처로 붙습니다(`ALLOWED_ORIGINS`에 Pages 출처 필요).
-- `deploy-cloudflare.yml`은 수동 실행(`workflow_dispatch`)만 합니다. 저장소 비밀 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 필요하고, D1 ID가 설정에 기록된 뒤(16.2) 씁니다.
+- `deploy-cloudflare.yml`은 수동 실행(`workflow_dispatch`)만 합니다. 저장소 비밀 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 필요합니다. D1 ID는 설정에 고정되어 있습니다(16.2).
 
 ## 17. 작업 분해
 

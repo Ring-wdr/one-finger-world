@@ -1,7 +1,7 @@
 import { runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { PING, PONG } from '@ofa/net';
+import { Close, PING, PONG } from '@ofa/net';
 import { Client } from './wsclient';
 
 async function addPlayer(id: string) {
@@ -15,6 +15,16 @@ describe('MatchRoom', () => {
 		c.ws.send(PING);
 		await c.waitFor((i) => ('text' in i && i.text === PONG ? true : undefined));
 		c.ws.close();
+	});
+
+	it('closes a socket that sends more messages than the budget allows', async () => {
+		const stub = env.MATCH.get(env.MATCH.newUniqueId());
+		const uid = `flood-${stub.id.toString().slice(0, 8)}`;
+		await addPlayer(uid);
+		const c = await Client.connect(stub, uid);
+		for (let i = 0; i < 300; i++) c.ws.send('{}');
+		const code = await c.waitFor((i) => ('close' in i ? i.close : undefined));
+		expect(code).toBe(Close.Flood);
 	});
 
 	it('rejects a request that is not a WebSocket upgrade or has no seat', async () => {

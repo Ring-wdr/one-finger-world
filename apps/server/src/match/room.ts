@@ -5,6 +5,10 @@ import { MatchCore } from './core';
 import { grantReward, recordMatch } from './rewards';
 import { MAX_CATCHUP_TICKS, SEAT_HEADER, decodeSeatHeader, type ConnId, type MatchHost, type MatchMeta } from './types';
 
+/** Per-connection message budget (§10.2 Flood): sustained rate and burst, e.g. frames queued during a stall. */
+const MSG_PER_SECOND = 40;
+const MSG_BURST = 100;
+
 interface Attachment {
 	conn: ConnId;
 	uid: string;
@@ -14,6 +18,7 @@ interface Attachment {
 export class MatchRoom extends DurableObject<Env> {
 	private core!: MatchCore;
 	private readonly sockets = new Map<ConnId, WebSocket>();
+	private readonly budgets = new Map<ConnId, { tokens: number; at: number }>();
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private nextTickAt = 0;
 	private coloLogged = false;
@@ -56,7 +61,14 @@ export class MatchRoom extends DurableObject<Env> {
 
 	webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
 		const conn = this.connOf(ws);
-		if (conn) this.core.message(conn, message);
+		if (!conn) return;
+		// Every message is billed (20 messages = 1 request), so one socket must not be able to burn the quota.
+		if (!this.withinBudget(conn)) {
+			ws.close(Close.Flood, 'Too many messages');
+			this.dropSocket(ws);
+			return;
+		}
+		this.core.message(conn, message);
 	}
 
 	webSocketClose(ws: WebSocket): void {
@@ -101,9 +113,20 @@ export class MatchRoom extends DurableObject<Env> {
 		return (ws.deserializeAttachment() as Attachment | null)?.conn ?? null;
 	}
 
+	/** Token bucket per connection: honest clients send 20 inputs/s plus a few control messages. */
+	private withinBudget(conn: ConnId): boolean {
+		const now = Date.now();
+		const b = this.budgets.get(conn) ?? { tokens: MSG_BURST, at: now };
+		b.tokens = Math.min(MSG_BURST, b.tokens + ((now - b.at) / 1000) * MSG_PER_SECOND) - 1;
+		b.at = now;
+		this.budgets.set(conn, b);
+		return b.tokens >= 0;
+	}
+
 	private dropSocket(ws: WebSocket): void {
 		const conn = this.connOf(ws);
 		if (!conn) return;
+		this.budgets.delete(conn);
 		this.sockets.delete(conn);
 		this.core.disconnect(conn);
 		this.sync();

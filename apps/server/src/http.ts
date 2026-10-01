@@ -46,8 +46,8 @@ export async function readJson<T>(request: Request, validate: (v: unknown) => T 
 	const bad = () => apiError(400, 'bad_request', 'Invalid request body');
 	const declared = Number(request.headers.get('Content-Length'));
 	if (declared > MAX_BODY_BYTES) return bad();
-	const text = await request.text();
-	if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) return bad();
+	const text = await readCapped(request, MAX_BODY_BYTES);
+	if (text === null) return bad();
 	let value: unknown;
 	try {
 		value = JSON.parse(text);
@@ -55,6 +55,31 @@ export async function readJson<T>(request: Request, validate: (v: unknown) => T 
 		return bad();
 	}
 	return validate(value) ?? bad();
+}
+
+/** The body as text, or null past `max` bytes. Stops reading there, so a chunked body without Content-Length cannot run long. */
+async function readCapped(request: Request, max: number): Promise<string | null> {
+	if (!request.body) return '';
+	const reader = request.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.byteLength;
+		if (size > max) {
+			await reader.cancel();
+			return null;
+		}
+		chunks.push(value);
+	}
+	const bytes = new Uint8Array(size);
+	let offset = 0;
+	for (const c of chunks) {
+		bytes.set(c, offset);
+		offset += c.byteLength;
+	}
+	return new TextDecoder().decode(bytes);
 }
 
 export function bearer(request: Request): string | null {

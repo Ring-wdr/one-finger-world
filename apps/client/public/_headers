@@ -1,0 +1,13 @@
+# Workers Static Assets response headers (docs/multiplayer-server-design.md §2). GitHub Pages ignores this file.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# Vite puts a content hash in every file name here, so a cached copy never goes stale.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Models keep their names across rebuilds: cache briefly, then revalidate with the ETag.
+/models/*
+  Cache-Control: public, max-age=3600

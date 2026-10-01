@@ -13,6 +13,7 @@ const MATCH_WS = /^\/api\/match\/([^/]+)\/ws$/;
 const MAX_RUNE_ID = 64;
 
 const NOT_SIGNED_IN = () => apiError(401, 'unauthorized', 'Sign in first');
+const RATE_LIMITED = () => apiError(429, 'rate_limited', 'Too many requests');
 
 const parseName = (v: unknown) => (typeof v === 'object' && v !== null && typeof (v as { name?: unknown }).name === 'string' ? (v as { name: string }).name : null);
 const parseRuneId = (v: unknown) => {
@@ -28,7 +29,7 @@ async function authenticate(request: Request, env: Env): Promise<string | null> 
 
 async function guest(request: Request, env: Env): Promise<Response> {
 	const ip = request.headers.get('CF-Connecting-IP') ?? 'local';
-	if (!(await env.GUEST_LIMITER.limit({ key: ip })).success) return apiError(429, 'rate_limited', 'Too many requests');
+	if (!(await env.GUEST_LIMITER.limit({ key: ip })).success) return RATE_LIMITED();
 	const now = Date.now();
 	const profile = await createPlayer(env.DB, crypto.randomUUID(), generateGuestName(Math.random), now);
 	const token = await signToken(env.AUTH_SECRET, { typ: 'guest', sub: profile.uid, iat: now });
@@ -44,6 +45,7 @@ async function profile(request: Request, env: Env): Promise<Response> {
 async function rename(request: Request, env: Env): Promise<Response> {
 	const uid = await authenticate(request, env);
 	if (!uid) return NOT_SIGNED_IN();
+	if (!(await env.ACCOUNT_LIMITER.limit({ key: uid })).success) return RATE_LIMITED();
 	const raw = await readJson(request, parseName);
 	if (raw instanceof Response) return raw;
 	const name = normalizeNickname(raw);
@@ -62,6 +64,7 @@ const SHOP_ERRORS: Record<ShopError | 'conflict', [number, ApiErrorCode, string]
 async function shop(request: Request, env: Env, action: 'buy' | 'equip'): Promise<Response> {
 	const uid = await authenticate(request, env);
 	if (!uid) return NOT_SIGNED_IN();
+	if (!(await env.ACCOUNT_LIMITER.limit({ key: uid })).success) return RATE_LIMITED();
 	const runeId = await readJson(request, parseRuneId);
 	if (runeId instanceof Response) return runeId;
 	const result = await updateProfile(env.DB, uid, (p) => (action === 'buy' ? buyRune(p, runeId) : toggleRune(p, runeId)));
@@ -73,7 +76,7 @@ async function shop(request: Request, env: Env, action: 'buy' | 'equip'): Promis
 async function quickplay(request: Request, env: Env): Promise<Response> {
 	const uid = await authenticate(request, env);
 	if (!uid) return NOT_SIGNED_IN();
-	if (!(await env.PLAY_LIMITER.limit({ key: uid })).success) return apiError(429, 'rate_limited', 'Too many requests');
+	if (!(await env.PLAY_LIMITER.limit({ key: uid })).success) return RATE_LIMITED();
 	// Matches already running play out; only new ones are refused.
 	if (!(await multiplayerOpen(env.DB))) return apiError(503, 'closed', 'Online play is closed by the operator');
 	const p = await getProfile(env.DB, uid);
