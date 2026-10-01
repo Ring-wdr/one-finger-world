@@ -109,8 +109,12 @@
 | 구성 | Caddy(`138.2.124.85.sslip.io`, Let's Encrypt) → Bun 핑 서버 |
 | 집 유선(KT 계열 추정) → 춘천 | TCP 연결 9 ms, WebSocket RTT p50 4.1 / p95 4.7 / p99 10.5 ms |
 | 같은 회선 → Cloudflare Worker | SJC 거점, TCP 연결 140 ms, WebSocket RTT p50 241 ms |
+| SKT LTE → 춘천 | WebSocket RTT p50 42.0 / p95 51.0 ms |
+| SKT LTE → Cloudflare Worker | NRT(도쿄) 거점, HTTP p50 84.5 / p95 95.4 ms (Worker 실행 포함이라 WebSocket과 직접 비교는 안 됨) |
 
-모바일 3사 측정은 남아 있습니다. 브라우저로 `https://138.2.124.85.sslip.io/`에 접속해 측정합니다.
+- LTE는 무선 구간에서만 25~35 ms가 걸려서 p50 40 ms 기준은 사실상 하한선입니다. 그래서 기준을 회선별로 나눕니다: **유선·5G p50 40 ms 미만, LTE p50 50 ms 미만, 모두 p95 80 ms 미만**. SKT LTE는 통과입니다.
+- Cloudflare의 한국 경로는 통신사마다 다릅니다(집 유선은 SJC, SKT는 NRT).
+- KT·LGU+·5G 측정은 남아 있습니다. 브라우저로 `https://138.2.124.85.sslip.io/`에 접속해 측정합니다.
 
 ## 5. 코드 구조 변경
 
