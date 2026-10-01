@@ -44,7 +44,7 @@
 		// "1" enables debug RPCs for integration tests only.
 		"TEST_HOOKS": "0",
 		// wss:// origin of the standalone match server (docs/match-server-oracle.md). Empty keeps every match on Durable Objects.
-		"MATCH_SERVER_ORIGIN": "wss://138.2.124.85.sslip.io"
+		"MATCH_SERVER_ORIGIN": "wss://168.107.48.33.sslip.io"
 	},
 	// AUTH_SECRET signs guest tokens and never leaves the Worker; TICKET_SECRET (match tickets) and
 	// INTERNAL_SECRET (match server → Worker calls) are shared with the match server.
