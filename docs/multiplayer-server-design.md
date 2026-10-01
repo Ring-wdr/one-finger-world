@@ -494,7 +494,7 @@ hp 비율은 살아 있으면 최소 1입니다. 목록은 255개에서 자릅�
 
 ## 12. 클라이언트 흐름
 
-- 시작 시 `GET /api/health`(3초 제한)로 온라인 가능 여부를 봅니다. API 출처는 `import.meta.env.VITE_API_ORIGIN || location.origin`입니다. GitHub Pages 빌드처럼 API가 없으면 오프라인 모드로 지금과 똑같이 동작합니다.
+- 시작 시 `GET /api/health`(3초 제한)로 온라인 가능 여부를 봅니다. API 출처는 `import.meta.env.VITE_API_ORIGIN || location.origin`입니다. API가 없으면 오프라인 모드로 지금과 똑같이 동작합니다. `VITE_OFFLINE_ONLY=1`로 빌드하면(GitHub Pages) 이 확인 자체를 하지 않습니다.
 - 온라인 가능하면 게스트 토큰을 확인하거나 만들고(`localStorage` 키 `ofa.auth.v1`) 서버 프로필을 씁니다. 메뉴·상점·결과가 서버 프로필을 보여 주고, 상점은 API로 사고 장착합니다. 로컬 연습 매치는 코인을 주지 않습니다(서버 프로필 모드). 오프라인 모드는 기존 로컬 프로필을 그대로 씁니다. 기존 로컬 코인은 서버로 옮기지 않습니다(조작 가능한 값이라서).
 - 스테이지: `menu → queue → online → result`, `result → queue | menu | spectate`, `spectate → result | queue`. 기존 `match`(연습)와 `tutorial`은 그대로입니다. 결과 화면의 "다시 하기"는 마지막 모드를 따릅니다.
 - `queue` 화면은 대기실 인원과 시작까지 남은 시간(`startsAt − (Date.now() + serverNow 보정)`)을 보여 주고 취소하면 연결을 닫습니다.
@@ -567,7 +567,7 @@ npx wrangler d1 migrations apply DB --remote       # 원격 D1에 스키마
 
 ### 16.3 CI
 
-- 기존 `deploy-pages.yml`은 그대로 타입체크·테스트 후 GitHub Pages에 오프라인판을 배포합니다. 저장소 변수 `VITE_API_ORIGIN`을 두면 Pages판도 Worker에 교차 출처로 붙습니다(`ALLOWED_ORIGINS`에 Pages 출처 필요).
+- 기존 `deploy-pages.yml`은 그대로 타입체크·테스트 후 GitHub Pages에 싱글 모드 전용판(`VITE_OFFLINE_ONLY=1`)을 배포합니다. Pages판은 서버에 붙지 않습니다.
 - `deploy-cloudflare.yml`은 수동 실행(`workflow_dispatch`)만 합니다. 저장소 비밀 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 필요합니다. D1 ID는 설정에 고정되어 있습니다(16.2).
 
 ## 17. 작업 분해
