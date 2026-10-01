@@ -14,7 +14,7 @@
 - 한국 사용자 RTT p50 40 ms 미만, p95 80 ms 미만, 12명 매치의 틱 간격 p99 70 ms 미만(기존 설계 §14와 같은 기준).
 - 월 비용 0원. Oracle Always Free 한도 안에서 운영합니다. 도메인은 선택이고 연 1만~2만 원입니다.
 - 클라이언트 프로토콜(기존 설계 §10)과 `MatchCore`(`apps/server/src/match/core.ts`)는 바꾸지 않습니다.
-- **기존 Durable Object 경로를 대체 수단으로 남깁니다.** 운영 스위치 하나로 매치 백엔드를 `oracle`과 `do` 사이에서 바꿀 수 있어야 합니다.
+- **기존 Durable Object 경로를 대체 수단으로 남깁니다.** 운영 스위치 하나로 매치 백엔드를 `server`(독립 매치 서버)와 `do` 사이에서 바꿀 수 있어야 합니다.
 
 범위 밖:
 - 매치 서버 여러 대와 지역 분산. 확장 경로는 §13에 둡니다.
@@ -38,7 +38,7 @@
 | 구성 | 위치 | 바뀌는 점 |
 | --- | --- | --- |
 | 정적 사이트, 게스트, 프로필, 상점, 운영 스위치 | Worker | 없음 |
-| 빠른 대전(`/api/quickplay`), Lobby DO | Worker | 백엔드가 `oracle`이면 매치 ID를 직접 만들고 응답에 `server`를 넣음 |
+| 빠른 대전(`/api/quickplay`), Lobby DO | Worker | 백엔드가 `server`이면 매치 ID를 직접 만들고 응답에 `server`를 넣음 |
 | 입장 티켓 서명 | Worker | 전용 키 `TICKET_SECRET`으로 분리(§7) |
 | 매치 실행 | **Oracle VM** | 새 앱 `apps/match-server`(Bun) |
 | 보상 지급, 매치 기록 | Worker → D1 | 매치 서버가 Worker 내부 API를 호출 |
@@ -238,11 +238,11 @@ DO의 "배포하면 소켓이 끊기고 체크포인트에서 이어짐"(기존 
    - `wrangler.jsonc`의 `secrets.required`에 추가합니다.
    - DO 경로의 `matchWs`도 같은 키로 검증합니다.
 2. **백엔드 스위치**:
-   - `settings` 테이블에 `match_backend` 행(`do` | `oracle`)을 둡니다. `settings.ts`의 캐시(10초)를 함께 씁니다.
-   - `bun run multiplayer -- backend oracle|do`를 추가합니다.
-   - 매치 서버 주소는 `wrangler.jsonc`의 변수 `MATCH_SERVER_ORIGIN`(예: `wss://match.<도메인>`)입니다. 비어 있으면 `oracle`이어도 `do`로 동작합니다.
+   - `settings` 테이블에 `match_backend` 행(`do` | `server`)을 둡니다. 값 이름은 공급자가 바뀌어도 그대로 쓰도록 `server`로 했습니다. `settings.ts`의 캐시(10초)를 함께 씁니다.
+   - `bun run multiplayer -- backend server|do`를 추가합니다.
+   - 매치 서버 주소는 `wrangler.jsonc`의 변수 `MATCH_SERVER_ORIGIN`(예: `wss://match.<도메인>`)입니다. 비어 있으면 `server`여도 `do`로 동작합니다.
 3. **`/api/quickplay`**:
-   - `oracle`이면 Lobby에 `assign(uid, 'oracle')`을 요청합니다. Lobby는 매치 ID를 `env.MATCH.newUniqueId()` 대신 무작위 32바이트 hex로 만듭니다(`MATCH_ID_PATTERN` 그대로).
+   - `server`이면 Lobby에 `assign(uid, 'server')`를 요청합니다. Lobby는 매치 ID를 `env.MATCH.newUniqueId()` 대신 무작위 32바이트 hex로 만듭니다(`MATCH_ID_PATTERN` 그대로).
    - 응답에 `server: MATCH_SERVER_ORIGIN`을 넣습니다.
    - 열려 있는 방의 백엔드가 지금 스위치와 다르면 그 방은 닫고 새 방을 엽니다. 백엔드 정보는 Lobby의 `OpenMatch`에 둡니다.
 4. **내부 API**(`/api/internal/grant`, `/api/internal/match`):
@@ -296,8 +296,17 @@ Oracle 무료 한도를 넘어서는 것은 동접이 수백 명을 넘어 코�
 | 2 | Worker: `TICKET_SECRET` 분리, 내부 API, `match_backend` 스위치(기본 `do`), `QuickplayResponse.server`, 클라이언트 `wsUrl` | 새 테스트 통과. 배포 후에도 백엔드는 `do`라 사용자 영향 없음 |
 | 3 | `apps/match-server`: 연결 검증, Room/Host, SQLite 체크포인트, SIGTERM 처리, `/health`. 테스트: 티켓·Origin 거절, Flood, 재시작 후 복구, 내부 API 서명 | Bun에서 매치 한 판 완주. 재시작 복구 테스트 통과 |
 | 4 | 인프라: 준비 스크립트, 배포 워크플로, 도메인. `loadtest`로 VM에 방 1개(12명)와 방 20개를 걸어 측정 | 틱 간격 p99 70 ms 미만, CPU 여유 확인 |
-| 5 | 전환: `bun run multiplayer -- backend oracle`. 한 주 동안 `match_end` 로그(틱 지터, RTT) 관찰 | 문제가 있으면 `backend do`로 즉시 되돌림(10초 안에 반영) |
-| 6 | 정리: README, 기존 설계 문서의 배포·관측 절 갱신. DO 경로는 대체 수단으로 유지 | - |
+| 5 | 전환: `bun run multiplayer -- backend server`. 한 주 동안 `match_end` 로그(틱 지터, RTT) 관찰 | 문제가 있으면 `backend do`로 즉시 되돌림(10초 안에 반영) |
+| 6 | 정리: README, 기존 설계 문서의 배포·관측 절 갱신. DO 경로는 대체 수단으로 유지 | - |
+
+### 12.1 진행 상황 (2026-10-01)
+
+| 단계 | 상태 | 결과 |
+| --- | --- | --- |
+| 0 | 완료(집 유선, SKT LTE). KT·LGU+·5G 남음 | 유선 p50 4.1 ms, SKT LTE p50 42.0 / p95 51.0 ms |
+| 1~3 | 구현 완료(PR) | 테스트 491개 통과. 로컬 wrangler dev + 매치 서버로 12명 매치, 강제 종료 후 SQLite 복구, `/api/internal/grant` 보상 기록 확인 |
+| 4 | 1차 완료 | E2.1.Micro(A1 한도 0)에 `provision.sh`·`deploy.sh`로 배포, `138.2.124.85.sslip.io`. 운영 Worker에서 12명 부하 테스트: RTT p50 4.7 / p95 7.9 ms, 틱 간격 p99 52.6 ms(이전 Cloudflare 경로: RTT p50 241 ms). 방 20개 부하 테스트와 CI 배포 워크플로는 남음 |
+| 5 | 전환함 | 운영 `match_backend = server`. 브라우저로 매치 중 `systemctl restart` → 자동 재접속, 체크포인트에서 재개 확인 |
 
 ## 13. 이후 확장
 
