@@ -1,9 +1,8 @@
 import { API, DATA_HASH, MATCH_ID_PATTERN, PROTOCOL_VERSION, type ApiErrorCode, type GuestResponse, type HealthResponse, type ProfileResponse, type QuickplayResponse } from '@ofa/net';
 import { buyRune, equippedRunes, generateGuestName, normalizeNickname, toggleRune, type ShopError } from '@ofa/meta';
-import { signToken, TICKET_TTL_MS, verifyGuest, verifyTicket } from './auth';
+import { encodeSeatHeader, SEAT_HEADER, signToken, TICKET_TTL_MS, verifyGuest, verifyTicket } from '@ofa/match';
 import { createPlayer, getProfile, renamePlayer, updateProfile } from './db';
 import { apiError, bearer, corsHeaders, json, originAllowed, readJson } from './http';
-import { encodeSeatHeader, SEAT_HEADER } from './match/types';
 import { multiplayerOpen } from './settings';
 
 export { Lobby } from './lobby';

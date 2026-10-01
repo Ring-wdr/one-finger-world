@@ -1,6 +1,6 @@
 import { expect } from 'vitest';
 import { decodeSnapshot, emptyFrame, encodeInput, parseServerMessage, type ServerMessage, type Snapshot } from '@ofa/net';
-import { SEAT_HEADER, encodeSeatHeader } from '../src/match/types';
+import { SEAT_HEADER, encodeSeatHeader } from '@ofa/match';
 
 /** Test WebSocket client shared by the room and end-to-end tests. */
 

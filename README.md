@@ -113,6 +113,7 @@ packages/sim     결정론적 게임 로직 (렌더러·DOM 의존 없음) — �
 packages/net     서버와 클라이언트가 공유하는 프로토콜: 상수·색인 표, 입력/스냅샷 바이너리 코덱, JSON 제어 메시지, HTTP API 타입,
                  관심 영역(AOI), 이동 예측기, 보간
 packages/meta    점수→코인 보상, 프로필/룬 규칙, 이름 생성 — 클라이언트(오프라인)와 서버 공용
+packages/match   권위 매치(MatchCore 상태 기계, 틱 루프, 메시지 예산, 서명 토큰) — Durable Object와 독립 매치 서버 공용
 apps/server      Cloudflare Worker: HTTP API, Lobby·MatchRoom Durable Object, D1 마이그레이션
   scripts/loadtest.ts  지연 측정 도구 (위 "지연 측정")
 scripts/dev-online.ts  wrangler dev + vite를 함께 띄우는 로컬 온라인 개발
