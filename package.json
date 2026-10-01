@@ -15,7 +15,7 @@
 		"deploy": "bun run build && bun run --cwd apps/server deploy",
 		"db:migrate:local": "bun run --cwd apps/server db:migrate:local",
 		"db:migrate:remote": "bun run --cwd apps/server db:migrate:remote",
-		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json && bun run --cwd apps/server types --check",
+		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/server/tsconfig.json && tsc --noEmit -p apps/match-server/tsconfig.json && bun run --cwd apps/server types --check",
 		"test": "vitest --run",
 		"test:unit": "vitest --run --project unit",
 		"test:workers": "vitest --run --project workers",
@@ -24,7 +24,8 @@
 		"loadtest": "bun apps/server/scripts/loadtest.ts",
 		"multiplayer": "bun apps/server/scripts/multiplayer.ts",
 		"assets:characters": "bun apps/client/scripts/build-characters.ts",
-		"assets:props": "bun apps/client/scripts/build-props.ts"
+		"assets:props": "bun apps/client/scripts/build-props.ts",
+		"dev:match": "bun run --cwd apps/match-server start"
 	},
 	"devDependencies": {
 		"@gltf-transform/core": "^4.5.0",

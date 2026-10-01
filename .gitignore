@@ -22,3 +22,4 @@ vite.config.ts.timestamp-*
 
 # Blender imports the builder modules
 __pycache__/
+apps/match-server/dist
