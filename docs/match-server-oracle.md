@@ -263,11 +263,13 @@ DO의 "배포하면 소켓이 끊기고 체크포인트에서 이어짐"(기존 
 
 ## 10. 배포
 
-- **CI**: `.github/workflows/deploy-match.yml`(수동 실행).
+- **CI**: `.github/workflows/deploy-online.yml`(수동 실행, `target`: all · match-server · worker).
   1. 타입체크와 테스트.
-  2. `bun build apps/match-server/src/main.ts --target=bun --outfile dist/server.js`. 의존 패키지까지 파일 하나로 묶으므로 VM에 `bun install`이 필요 없습니다.
-  3. SSH(저장소 비밀 `MATCH_SSH_KEY`, `MATCH_HOST`)로 `releases/<sha>/`에 업로드하고, `current` 링크를 바꾼 뒤 `systemctl restart ofa-match`.
-  4. `/health`가 같은 커밋 sha를 돌려주는지 확인. 실패하면 이전 링크로 되돌립니다.
+  2. 매치 서버: `apps/match-server/deploy/deploy.sh`가 `bun build`로 파일 하나를 만들어 SSH로 올리고, `current` 링크를 바꾼 뒤 재시작합니다. `/health`가 새 커밋을 보고하지 않으면 이전 릴리스로 되돌립니다.
+  3. D1 마이그레이션과 Worker 배포.
+  4. Worker와 매치 서버의 `dataHash`가 같은지, 매치 서버가 이 커밋인지 확인합니다.
+  - 저장소 비밀: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `MATCH_HOST`, `MATCH_SSH_KEY`(CI 전용 키, VM의 `authorized_keys`에 따로 등록), `MATCH_KNOWN_HOSTS`(VM 호스트 키 고정).
+  - 그래서 VM의 SSH(22)는 인터넷 전체에 열려 있습니다. 비밀번호 로그인은 꺼져 있고(키 인증만), fail2ban이 무차별 대입을 막습니다. CI 키가 유출되면 VM의 `~ubuntu/.ssh/authorized_keys`에서 `github-actions-deploy@one-finger-world` 줄을 지우고 새 키를 등록합니다.
 - **배포 순서**: 프로토콜이나 `DATA_HASH`가 바뀌는 변경은 **매치 서버를 먼저**, 그다음 Worker(클라이언트 포함)를 배포합니다.
   - 매치 서버는 `v`/`h`가 다르면 409를 냅니다. 그래서 둘 사이 수십 초 동안 새 매치 입장이 실패할 수 있습니다.
   - 이 시간을 없애려면 매치 서버가 바로 전 `DATA_HASH`도 받게 할 수 있지만, sim 규칙이 다르면 결과가 어긋나므로 받지 않습니다.

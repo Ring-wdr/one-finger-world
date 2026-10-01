@@ -67,7 +67,8 @@ bun run db:migrate:remote               # 새 마이그레이션이 있으면 �
 bun run deploy                          # 클라이언트 빌드 → wrangler deploy
 ```
 
-- 그 뒤에는 GitHub Actions의 **Deploy to Cloudflare**(`.github/workflows/deploy-cloudflare.yml`)를 수동 실행하면 타입체크·테스트·빌드·원격 마이그레이션·배포까지 합니다. 저장소 비밀 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 필요합니다.
+- **보통은 GitHub Actions의 Deploy online**(`.github/workflows/deploy-online.yml`)을 수동 실행합니다. 타입체크·테스트 후 같은 커밋을 **매치 서버(Oracle) → D1 마이그레이션 → Worker** 순서로 배포하고, 두 쪽의 데이터 해시와 매치 서버 릴리스가 맞는지 확인합니다. `target`으로 한쪽만 배포할 수도 있습니다(`match-server`, `worker`). 저장소 비밀 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `MATCH_HOST`, `MATCH_SSH_KEY`(CI 전용 키), `MATCH_KNOWN_HOSTS`가 필요합니다.
+- 매치 서버만 로컬에서 배포할 때: `apps/match-server/deploy/deploy.sh ubuntu@168.107.48.33`. VM을 새로 만들 때는 `deploy/provision.sh <호스트명>`을 먼저 실행합니다(docs/match-server-oracle.md §4).
 - 배포하면 진행 중인 매치의 소켓이 끊기고 체크포인트(최대 2초 전)에서 이어집니다. 사람이 많을 때는 피합니다.
 - **GitHub Pages판은 싱글 모드 전용**입니다. 워크플로가 `VITE_OFFLINE_ONLY=1`로 빌드하므로 서버에 요청하지 않고, 온라인 매치 버튼·닉네임 설정 없이 로컬 프로필(코인·룬)로만 동작합니다. 온라인 매치는 Worker 주소에서만 합니다.
 

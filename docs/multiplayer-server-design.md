@@ -568,7 +568,7 @@ npx wrangler d1 migrations apply DB --remote       # 원격 D1에 스키마
 ### 16.3 CI
 
 - 기존 `deploy-pages.yml`은 그대로 타입체크·테스트 후 GitHub Pages에 싱글 모드 전용판(`VITE_OFFLINE_ONLY=1`)을 배포합니다. Pages판은 서버에 붙지 않습니다.
-- `deploy-cloudflare.yml`은 수동 실행(`workflow_dispatch`)만 합니다. 저장소 비밀 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 필요합니다. D1 ID는 설정에 고정되어 있습니다(16.2).
+- `deploy-online.yml`(수동 실행)이 Worker와 독립 매치 서버를 같은 커밋으로 배포합니다. 순서와 필요한 비밀은 `docs/match-server-oracle.md` §10에 있습니다.
 
 ## 17. 작업 분해
 
