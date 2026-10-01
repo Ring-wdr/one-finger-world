@@ -67,7 +67,7 @@ describe('end to end through the Worker', () => {
 	it('a well-formed id that this namespace never minted is 404, not a server error', async () => {
 		const g = await guest();
 		const mid = 'ab'.repeat(32);
-		const ticket = await signToken(env.AUTH_SECRET, { typ: 'ticket', sub: g.profile.uid, mid, name: g.profile.name, runes: [], iat: Date.now(), exp: Date.now() + 60_000 });
+		const ticket = await signToken(env.TICKET_SECRET, { typ: 'ticket', sub: g.profile.uid, mid, name: g.profile.name, runes: [], iat: Date.now(), exp: Date.now() + 60_000 });
 		const res = await call(wsPath({ matchId: mid, ticket }), { headers: { Upgrade: 'websocket' } });
 		expect(res.status).toBe(404);
 	});

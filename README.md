@@ -79,9 +79,11 @@ bun run deploy                          # 클라이언트 빌드 → wrangler de
 bun run multiplayer -- off      # 닫기 (wrangler가 로그인된 PC에서, 원격 D1)
 bun run multiplayer -- on       # 다시 열기
 bun run multiplayer -- status   # 현재 상태 (--local: 로컬 개발 서버)
+bun run multiplayer -- backend server   # 새 매치를 독립 매치 서버로 (MATCH_SERVER_ORIGIN 설정 필요)
+bun run multiplayer -- backend do       # 새 매치를 Durable Object로 (대체 경로)
 ```
 
-반영까지 최대 10초 걸립니다. 자세한 동작은 설계 문서 7.1절에 있습니다.
+반영까지 최대 10초 걸립니다. 자세한 동작은 설계 문서 7.1절, 매치 백엔드 전환은 [docs/match-server-oracle.md](docs/match-server-oracle.md)에 있습니다.
 
 ## 지연 측정
 

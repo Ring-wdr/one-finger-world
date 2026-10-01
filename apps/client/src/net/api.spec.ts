@@ -208,4 +208,8 @@ describe('wsUrl', () => {
 		expect(c.origin).toBe('http://localhost:8787');
 		expect(c.wsUrl(id, 'a b&c')).toBe(`ws://localhost:8787/api/match/${id}/ws?ticket=a%20b%26c&v=${PROTOCOL_VERSION}&h=${DATA_HASH}`);
 	});
+
+	it('goes to the standalone match server when quickplay names one', () => {
+		expect(client(fn).wsUrl(id, 'a.b', 'wss://match.example/')).toBe(`wss://match.example/match/${id}/ws?ticket=a.b&v=${PROTOCOL_VERSION}&h=${DATA_HASH}`);
+	});
 });

@@ -42,7 +42,11 @@
 		// Extra origins (comma-separated) allowed to call the API cross-origin, e.g. the GitHub Pages build.
 		"ALLOWED_ORIGINS": "https://ring-wdr.github.io",
 		// "1" enables debug RPCs for integration tests only.
-		"TEST_HOOKS": "0"
+		"TEST_HOOKS": "0",
+		// wss:// origin of the standalone match server (docs/match-server-oracle.md). Empty keeps every match on Durable Objects.
+		"MATCH_SERVER_ORIGIN": ""
 	},
-	"secrets": { "required": ["AUTH_SECRET"] }
+	// AUTH_SECRET signs guest tokens and never leaves the Worker; TICKET_SECRET (match tickets) and
+	// INTERNAL_SECRET (match server → Worker calls) are shared with the match server.
+	"secrets": { "required": ["AUTH_SECRET", "TICKET_SECRET", "INTERNAL_SECRET"] }
 }

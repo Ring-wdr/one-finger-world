@@ -58,7 +58,7 @@ export async function readJson<T>(request: Request, validate: (v: unknown) => T 
 }
 
 /** The body as text, or null past `max` bytes. Stops reading there, so a chunked body without Content-Length cannot run long. */
-async function readCapped(request: Request, max: number): Promise<string | null> {
+export async function readCapped(request: Request, max: number): Promise<string | null> {
 	if (!request.body) return '';
 	const reader = request.body.getReader();
 	const chunks: Uint8Array[] = [];
