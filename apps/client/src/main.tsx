@@ -16,7 +16,8 @@ const disposeStage = effect(() => {
 });
 render(<App game={gameActions} />, ui);
 // Not awaited: the menu is usable at once and switches to the server profile when the API answers.
-void initOnline();
+// The GitHub Pages build is single-player only and never contacts a server.
+if (import.meta.env.VITE_OFFLINE_ONLY !== '1') void initOnline();
 
 if (import.meta.hot)
 	import.meta.hot.dispose(() => {

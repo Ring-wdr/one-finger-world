@@ -3,7 +3,7 @@
 한 손가락으로 하는 3D 실시간 육성 배틀로얄. **싱글플레이(플레이어 1명 + 봇 11명)** 는 브라우저만으로 동작하고, **온라인 멀티플레이**(최대 12명, 빈 자리는 봇)는 Cloudflare Worker 서버가 맡습니다.
 3D 멀미를 고려해 **고정 각도 쿼터뷰**를 씁니다. 카메라는 감쇠 이동만 하고 회전, 흔들림, 헤드밥은 없습니다.
 
-**플레이: https://ring-wdr.github.io/one-finger-world/** — `main`에 푸시될 때마다 GitHub Actions(`.github/workflows/deploy-pages.yml`)가 타입체크·테스트 후 자동 배포합니다.
+**플레이(싱글): https://ring-wdr.github.io/one-finger-world/** · **온라인: https://one-finger-royale.akswnd55.workers.dev** — Pages판은 `main`에 푸시될 때마다 GitHub Actions(`.github/workflows/deploy-pages.yml`)가 타입체크·테스트 후 자동 배포합니다.
 
 ```bash
 bun install
@@ -69,7 +69,7 @@ bun run deploy                          # 클라이언트 빌드 → wrangler de
 
 - 그 뒤에는 GitHub Actions의 **Deploy to Cloudflare**(`.github/workflows/deploy-cloudflare.yml`)를 수동 실행하면 타입체크·테스트·빌드·원격 마이그레이션·배포까지 합니다. 저장소 비밀 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`가 필요합니다.
 - 배포하면 진행 중인 매치의 소켓이 끊기고 체크포인트(최대 2초 전)에서 이어집니다. 사람이 많을 때는 피합니다.
-- **GitHub Pages판을 서버에 붙이려면** 저장소 변수 `VITE_API_ORIGIN`에 Worker 주소(예: `https://one-finger-royale.<계정>.workers.dev`)를 넣습니다. 비워 두면 Pages 빌드는 오프라인 전용입니다. 이 경우 Worker의 `ALLOWED_ORIGINS`(`apps/server/wrangler.jsonc`, 쉼표 목록)에 Pages 출처(`https://ring-wdr.github.io`)가 있어야 교차 출처 호출과 WebSocket이 허용됩니다.
+- **GitHub Pages판은 싱글 모드 전용**입니다. 워크플로가 `VITE_OFFLINE_ONLY=1`로 빌드하므로 서버에 요청하지 않고, 온라인 매치 버튼·닉네임 설정 없이 로컬 프로필(코인·룬)로만 동작합니다. 온라인 매치는 Worker 주소에서만 합니다.
 
 ## 멀티플레이 켜기/끄기
 
