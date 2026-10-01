@@ -2,6 +2,7 @@ import {
 	API,
 	DATA_HASH,
 	PROTOCOL_VERSION,
+	serverMatchWs,
 	type ApiErrorBody,
 	type ApiErrorCode,
 	type GuestResponse,
@@ -105,10 +106,14 @@ export class ApiClient {
 		return this.request<QuickplayResponse>('POST', API.quickplay, true);
 	}
 
-	/** ws(s)://<origin>/api/match/<id>/ws?ticket=…&v=PROTOCOL_VERSION&h=DATA_HASH (ws for http origins). */
-	wsUrl(matchId: string, ticket: string): string {
-		const base = this.origin.replace(/^http/, 'ws');
-		return `${base}${API.matchWs(matchId)}?ticket=${encodeURIComponent(ticket)}&v=${PROTOCOL_VERSION}&h=${DATA_HASH}`;
+	/**
+	 * ws(s)://<origin>/api/match/<id>/ws?ticket=…&v=PROTOCOL_VERSION&h=DATA_HASH (ws for http origins), or
+	 * <server>/match/<id>/ws?… when quickplay named a standalone match server (docs/match-server-oracle.md §9).
+	 */
+	wsUrl(matchId: string, ticket: string, server?: string): string {
+		const query = `?ticket=${encodeURIComponent(ticket)}&v=${PROTOCOL_VERSION}&h=${DATA_HASH}`;
+		if (server) return `${server.replace(/\/+$/, '')}${serverMatchWs(matchId)}${query}`;
+		return `${this.origin.replace(/^http/, 'ws')}${API.matchWs(matchId)}${query}`;
 	}
 
 	private readToken(): string | null {

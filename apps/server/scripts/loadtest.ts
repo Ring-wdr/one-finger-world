@@ -19,6 +19,7 @@ import {
 	encodeInput,
 	parseServerMessage,
 	quantizeDir,
+	serverMatchWs,
 	type GuestResponse,
 	type InputFrame,
 	type QuickplayResponse,
@@ -93,8 +94,9 @@ class LoadClient {
 	/** Signs in, joins the lobby and opens the socket; resolves once connected. */
 	async connect(): Promise<void> {
 		const { token } = await api<GuestResponse>(API.guest, { method: 'POST' });
-		const { matchId, ticket } = await api<QuickplayResponse>(API.quickplay, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
-		const wsUrl = new URL(baseUrl.replace(/^http/, 'ws') + API.matchWs(matchId));
+		const { matchId, ticket, server } = await api<QuickplayResponse>(API.quickplay, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+		// The standalone match server when the Worker names one (docs/match-server-oracle.md), else the Worker's DO route.
+		const wsUrl = new URL(server ? server + serverMatchWs(matchId) : baseUrl.replace(/^http/, 'ws') + API.matchWs(matchId));
 		wsUrl.search = new URLSearchParams({ ticket, v: String(PROTOCOL_VERSION), h: DATA_HASH }).toString();
 		this.ws = new WebSocket(wsUrl);
 		this.ws.binaryType = 'arraybuffer';

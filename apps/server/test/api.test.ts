@@ -6,6 +6,7 @@ import { corsHeaders, originAllowed } from '../src/http';
 
 const ORIGIN = 'http://test';
 const secret = env.AUTH_SECRET;
+const ticketSecret = env.TICKET_SECRET;
 
 function call(path: string, init: Omit<RequestInit, 'body'> & { token?: string; body?: unknown } = {}) {
 	const { token, body, ...rest } = init;
@@ -135,10 +136,10 @@ describe('quickplay', () => {
 		const qb = await (await post(API.quickplay, b.token)).json<QuickplayResponse>();
 		expect(qb.matchId).toBe(qa.matchId);
 
-		const claims = await verifyTicket(secret, qa.ticket, Date.now());
+		const claims = await verifyTicket(ticketSecret, qa.ticket, Date.now());
 		expect(claims).toMatchObject({ sub: a.profile.uid, mid: qa.matchId, name: '테스터', runes: ['rune_power'] });
 		expect(claims!.exp - claims!.iat).toBe(15 * 60_000);
-		expect((await verifyTicket(secret, qb.ticket, Date.now()))!.runes).toEqual([]);
+		expect((await verifyTicket(ticketSecret, qb.ticket, Date.now()))!.runes).toEqual([]);
 	});
 
 	it('requires a guest token', async () => {
@@ -150,7 +151,7 @@ describe('match websocket route', () => {
 	// Only ids minted by the namespace pass idFromString.
 	const matchId = env.MATCH.newUniqueId().toString();
 	const ticketFor = (uid: string, mid = matchId, ttl = 60_000) =>
-		signToken(secret, { typ: 'ticket', sub: uid, mid, name: 'n', runes: [], iat: Date.now(), exp: Date.now() + ttl });
+		signToken(ticketSecret, { typ: 'ticket', sub: uid, mid, name: 'n', runes: [], iat: Date.now(), exp: Date.now() + ttl });
 	const ws = (id: string, query: Record<string, string>, headers: Record<string, string> = { Upgrade: 'websocket' }) =>
 		call(`/api/match/${id}/ws?${new URLSearchParams(query)}`, { headers });
 	const good = async () => ({ v: String(PROTOCOL_VERSION), h: DATA_HASH, ticket: await ticketFor('u1') });
@@ -172,6 +173,9 @@ describe('match websocket route', () => {
 		expect((await ws(matchId, { ...base, ticket: await ticketFor('u1', matchId, -1) })).status).toBe(401);
 		const guestToken = await signToken(secret, { typ: 'guest', sub: 'u1', iat: 0 });
 		expect((await ws(matchId, { ...base, ticket: guestToken })).status).toBe(401);
+		// A ticket must be signed with TICKET_SECRET, not the guest-token key.
+		const wrongKey = await signToken(secret, { typ: 'ticket', sub: 'u1', mid: matchId, name: 'n', runes: [], iat: Date.now(), exp: Date.now() + 60_000 });
+		expect((await ws(matchId, { ...base, ticket: wrongKey })).status).toBe(401);
 	});
 
 	it('refuses a foreign Origin', async () => {

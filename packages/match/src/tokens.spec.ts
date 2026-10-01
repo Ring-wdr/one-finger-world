@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { signToken, verifyGuest, verifyTicket, TICKET_TTL_MS, type GuestClaims, type TicketClaims } from './tokens';
+import { INTERNAL_MAX_SKEW_MS, signInternal, signToken, verifyGuest, verifyInternal, verifyTicket, TICKET_TTL_MS, type GuestClaims, type TicketClaims } from './tokens';
 
 const SECRET = 'unit-secret-0123456789abcdef0123456789';
 const guest: GuestClaims = { typ: 'guest', sub: 'u-1', iat: 1000 };
@@ -55,5 +55,23 @@ describe('tokens', () => {
 			expect(await verifyGuest(SECRET, s)).toBeNull();
 			expect(await verifyTicket(SECRET, s, 0)).toBeNull();
 		}
+	});
+});
+
+describe('internal request signatures', () => {
+	const secret = 'internal-test-secret';
+	const body = JSON.stringify({ a: 1 });
+
+	it('accepts its own signature within the clock window', async () => {
+		const sig = await signInternal(secret, body, 1_000_000);
+		expect(await verifyInternal(secret, sig, body, 1_000_000 + INTERNAL_MAX_SKEW_MS)).toBe(true);
+	});
+
+	it('rejects another body, another secret, a stale timestamp and garbage', async () => {
+		const sig = await signInternal(secret, body, 1_000_000);
+		expect(await verifyInternal(secret, sig, '{"a":2}', 1_000_000)).toBe(false);
+		expect(await verifyInternal('other', sig, body, 1_000_000)).toBe(false);
+		expect(await verifyInternal(secret, sig, body, 1_000_001 + INTERNAL_MAX_SKEW_MS)).toBe(false);
+		for (const bad of [null, '', 'x', '123.', '.abc', '1.2.3', `${'9'.repeat(16)}.abc`]) expect(await verifyInternal(secret, bad, body, 1_000_000)).toBe(false);
 	});
 });

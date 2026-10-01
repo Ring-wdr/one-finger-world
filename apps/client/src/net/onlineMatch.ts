@@ -336,7 +336,7 @@ export class OnlineMatch {
 			const q = await this.api.quickplay();
 			if (gen !== this.generation) return;
 			this.conn = new MatchConnection(
-				this.api.wsUrl(q.matchId, q.ticket),
+				this.api.wsUrl(q.matchId, q.ticket, q.server),
 				{
 					onOpen: () => this.cb.onConnection('open'),
 					onText: (t) => this.onText(t),

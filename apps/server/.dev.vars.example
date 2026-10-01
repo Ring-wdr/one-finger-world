@@ -1,3 +1,5 @@
-# Copy to .dev.vars (git-ignored) for `wrangler dev`. Production uses `wrangler secret put AUTH_SECRET`.
+# Copy to .dev.vars (git-ignored) for `wrangler dev`. Production sets these with `wrangler secret put` (docs/match-server-oracle.md §7).
 AUTH_SECRET=local-dev-only-secret-change-me-0123456789abcdef
+TICKET_SECRET=local-dev-only-ticket-secret-0123456789abcdef
+INTERNAL_SECRET=local-dev-only-internal-secret-0123456789abcdef
 # `bun run dev:online` also passes --var ALLOWED_ORIGINS:* so the Vite dev origin may open the WebSocket.

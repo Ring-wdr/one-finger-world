@@ -9,6 +9,8 @@ import { defineConfig } from 'vitest/config';
  */
 // Required by wrangler.jsonc's secrets.required; read from process.env by the plugin.
 process.env.AUTH_SECRET ??= 'test-only-secret-0123456789abcdef0123456789abcdef';
+process.env.TICKET_SECRET ??= 'test-only-ticket-secret-0123456789abcdef01234567';
+process.env.INTERNAL_SECRET ??= 'test-only-internal-secret-0123456789abcdef012345';
 
 export default defineConfig({
 	plugins: [

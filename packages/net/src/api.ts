@@ -10,8 +10,14 @@ export const API = {
 	buy: '/api/shop/buy',
 	equip: '/api/shop/equip',
 	quickplay: '/api/quickplay',
-	matchWs: (matchId: string) => `/api/match/${matchId}/ws`
+	matchWs: (matchId: string) => `/api/match/${matchId}/ws`,
+	/** Match server → Worker, signed with INTERNAL_SECRET (docs/match-server-oracle.md §8). */
+	internalGrant: '/api/internal/grant',
+	internalMatch: '/api/internal/match'
 } as const;
+
+/** The match server's own WebSocket path (no /api prefix: it is not the Worker). */
+export const serverMatchWs = (matchId: string) => `/match/${matchId}/ws`;
 
 /** A Durable Object id string, as the lobby hands it out. */
 export const MATCH_ID_PATTERN = /^[0-9a-f]{64}$/;
@@ -32,6 +38,8 @@ export interface HealthResponse {
 	dataHash: string;
 	/** False while the operator has closed online play; the client then explains instead of queueing. */
 	multiplayer: boolean;
+	/** Where new matches run (docs/match-server-oracle.md): the Worker's Durable Objects or the standalone match server. */
+	matchBackend?: 'do' | 'server';
 }
 
 export interface GuestResponse {
@@ -54,6 +62,8 @@ export interface RuneRequest {
 export interface QuickplayResponse {
 	matchId: string;
 	ticket: string;
+	/** Origin of the standalone match server (wss://…) when the match runs there; absent for Durable Object matches. */
+	server?: string;
 }
 
 export type ApiErrorCode =

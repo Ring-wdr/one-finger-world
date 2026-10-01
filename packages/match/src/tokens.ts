@@ -81,3 +81,28 @@ export async function verifyTicket(secret: string, token: string, now: number): 
 	if (!Array.isArray(c.runes) || !c.runes.every((r) => typeof r === 'string')) return null;
 	return { typ: 'ticket', sub: c.sub, mid: c.mid, name: c.name, runes: c.runes, iat: c.iat, exp: c.exp };
 }
+
+// ── Match server → Worker requests (docs/match-server-oracle.md §7)
+
+/** Header carrying `<epoch ms>.<base64url HMAC-SHA256(secret, "<epoch ms>.<body>")>`. */
+export const INTERNAL_SIG_HEADER = 'X-OFA-Sig';
+/** How far a signed request's timestamp may be from the receiver's clock. */
+export const INTERNAL_MAX_SKEW_MS = 5 * 60_000;
+
+export async function signInternal(secret: string, body: string, now: number): Promise<string> {
+	const sig = await crypto.subtle.sign('HMAC', await importKey(secret), encoder.encode(`${now}.${body}`));
+	return `${now}.${toB64url(new Uint8Array(sig))}`;
+}
+
+/** Replays inside the window are harmless: reward grants are idempotent per (match, player). */
+export async function verifyInternal(secret: string, header: string | null, body: string, now: number): Promise<boolean> {
+	const m = /^(\d{1,15})\.([A-Za-z0-9_-]+)$/.exec(header ?? '');
+	if (!m) return false;
+	const ts = Number(m[1]);
+	if (Math.abs(now - ts) > INTERNAL_MAX_SKEW_MS) return false;
+	try {
+		return await crypto.subtle.verify('HMAC', await importKey(secret), fromB64url(m[2]), encoder.encode(`${ts}.${body}`));
+	} catch {
+		return false;
+	}
+}

@@ -4,7 +4,7 @@
  * Run with `bun run dev:online`; Ctrl+C stops both.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { copyFileSync, existsSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
@@ -26,9 +26,21 @@ function step(label: string, cmd: string[], cwd: string): void {
 if (!existsSync(join(client, 'dist'))) step('apps/client/dist is missing, building the client once', ['bun', 'run', 'build'], root);
 
 const vars = join(server, '.dev.vars');
+const example = join(server, '.dev.vars.example');
 if (!existsSync(vars)) {
-	copyFileSync(join(server, '.dev.vars.example'), vars);
-	console.log('[dev-online] created apps/server/.dev.vars from .dev.vars.example (local-only AUTH_SECRET)');
+	copyFileSync(example, vars);
+	console.log('[dev-online] created apps/server/.dev.vars from .dev.vars.example (local-only secrets)');
+} else {
+	// Secrets added after the file was created (e.g. TICKET_SECRET): wrangler refuses to start without them.
+	const have = readFileSync(vars, 'utf8');
+	const names = new Set(have.split(/\r?\n/).map((line) => line.split('=')[0]));
+	const missing = readFileSync(example, 'utf8')
+		.split(/\r?\n/)
+		.filter((line) => /^[A-Z_]+=/.test(line) && !names.has(line.split('=')[0]));
+	if (missing.length > 0) {
+		appendFileSync(vars, (have.endsWith('\n') ? '' : '\n') + missing.join('\n') + '\n');
+		console.log(`[dev-online] added ${missing.map((l) => l.split('=')[0]).join(', ')} to apps/server/.dev.vars`);
+	}
 }
 
 step('applying local D1 migrations', ['bunx', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local'], server);

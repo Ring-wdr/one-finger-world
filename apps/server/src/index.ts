@@ -1,9 +1,10 @@
 import { API, DATA_HASH, MATCH_ID_PATTERN, PROTOCOL_VERSION, type ApiErrorCode, type GuestResponse, type HealthResponse, type ProfileResponse, type QuickplayResponse } from '@ofa/net';
 import { buyRune, equippedRunes, generateGuestName, normalizeNickname, toggleRune, type ShopError } from '@ofa/meta';
-import { encodeSeatHeader, SEAT_HEADER, signToken, TICKET_TTL_MS, verifyGuest, verifyTicket } from '@ofa/match';
+import { encodeSeatHeader, INTERNAL_SIG_HEADER, SEAT_HEADER, signToken, TICKET_TTL_MS, verifyGuest, verifyInternal, verifyTicket, type MatchSummary, type RewardGrant } from '@ofa/match';
 import { createPlayer, getProfile, renamePlayer, updateProfile } from './db';
-import { apiError, bearer, corsHeaders, json, originAllowed, readJson } from './http';
-import { multiplayerOpen } from './settings';
+import { apiError, bearer, corsHeaders, json, originAllowed, readCapped, readJson } from './http';
+import { grantReward, recordMatch } from './match/rewards';
+import { readSettings, type MatchBackend } from './settings';
 
 export { Lobby } from './lobby';
 export { MatchRoom } from './match/room';
@@ -72,18 +73,25 @@ async function shop(request: Request, env: Env, action: 'buy' | 'equip'): Promis
 	return json({ profile: result } satisfies ProfileResponse);
 }
 
+/** The standalone match server only takes matches once its origin is configured. */
+function effectiveBackend(chosen: MatchBackend, env: Env): MatchBackend {
+	return chosen === 'server' && env.MATCH_SERVER_ORIGIN ? 'server' : 'do';
+}
+
 async function quickplay(request: Request, env: Env): Promise<Response> {
 	const uid = await authenticate(request, env);
 	if (!uid) return NOT_SIGNED_IN();
 	if (!(await env.PLAY_LIMITER.limit({ key: uid })).success) return RATE_LIMITED();
 	// Matches already running play out; only new ones are refused.
-	if (!(await multiplayerOpen(env.DB))) return apiError(503, 'closed', 'Online play is closed by the operator');
+	const settings = await readSettings(env.DB);
+	if (!settings.open) return apiError(503, 'closed', 'Online play is closed by the operator');
 	const p = await getProfile(env.DB, uid);
 	if (!p) return NOT_SIGNED_IN();
 	const lobby = env.LOBBY.getByName('lobby', { locationHint: env.LOCATION_HINT as DurableObjectLocationHint });
-	const { matchId } = await lobby.assign(uid);
+	const backend = effectiveBackend(settings.backend, env);
+	const { matchId } = await lobby.assign(uid, backend);
 	const now = Date.now();
-	const ticket = await signToken(env.AUTH_SECRET, {
+	const ticket = await signToken(env.TICKET_SECRET, {
 		typ: 'ticket',
 		sub: uid,
 		mid: matchId,
@@ -92,7 +100,7 @@ async function quickplay(request: Request, env: Env): Promise<Response> {
 		iat: now,
 		exp: now + TICKET_TTL_MS
 	});
-	return json({ matchId, ticket } satisfies QuickplayResponse);
+	return json((backend === 'server' ? { matchId, ticket, server: env.MATCH_SERVER_ORIGIN } : { matchId, ticket }) satisfies QuickplayResponse);
 }
 
 async function matchWs(request: Request, env: Env, id: string): Promise<Response> {
@@ -101,7 +109,7 @@ async function matchWs(request: Request, env: Env, id: string): Promise<Response
 	if (!originAllowed(request, env)) return apiError(403, 'unauthorized', 'Origin not allowed');
 	const query = new URL(request.url).searchParams;
 	if (query.get('v') !== String(PROTOCOL_VERSION) || query.get('h') !== DATA_HASH) return apiError(409, 'version', 'Client version mismatch');
-	const claims = await verifyTicket(env.AUTH_SECRET, query.get('ticket') ?? '', Date.now());
+	const claims = await verifyTicket(env.TICKET_SECRET, query.get('ticket') ?? '', Date.now());
 	if (!claims || claims.mid !== id) return apiError(401, 'unauthorized', 'Invalid ticket');
 	let room: DurableObjectId;
 	try {
@@ -115,19 +123,75 @@ async function matchWs(request: Request, env: Env, id: string): Promise<Response
 	return env.MATCH.get(room, { locationHint: env.LOCATION_HINT as DurableObjectLocationHint }).fetch(forwarded);
 }
 
+// ── Match server → Worker (docs/match-server-oracle.md §8): rewards and match rows for matches the Worker does not host.
+
+const MAX_INTERNAL_BYTES = 8192;
+const isInt = (v: unknown, min = 0): v is number => typeof v === 'number' && Number.isInteger(v) && v >= min;
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+function parseGrant(v: unknown): RewardGrant | null {
+	if (!isObj(v) || !isObj(v.result)) return null;
+	const { matchId, uid, score, coins, result: r } = v;
+	if (typeof matchId !== 'string' || !MATCH_ID_PATTERN.test(matchId) || typeof uid !== 'string' || !uid || !isInt(score) || !isInt(coins)) return null;
+	if (!isInt(r.placement, 1) || !isInt(r.kills) || !isInt(r.level) || typeof r.time !== 'number' || !(r.time >= 0) || typeof r.leftEarly !== 'boolean') return null;
+	return { matchId, uid, score, coins, result: { placement: r.placement, kills: r.kills, level: r.level, time: r.time, leftEarly: r.leftEarly } };
+}
+
+function parseSummary(v: unknown): MatchSummary | null {
+	if (!isObj(v)) return null;
+	const { matchId, seed, startedAt, endedAt, durationS, humans, winnerUid } = v;
+	if (typeof matchId !== 'string' || !MATCH_ID_PATTERN.test(matchId) || !isInt(seed) || !isInt(startedAt) || !isInt(endedAt) || typeof durationS !== 'number' || !isInt(humans)) return null;
+	if (winnerUid !== null && typeof winnerUid !== 'string') return null;
+	return { matchId, seed, startedAt, endedAt, durationS, humans, winnerUid };
+}
+
+/** Verifies the signature over the raw body, then parses it. Browsers never call these: any Origin is refused. */
+async function internal<T>(request: Request, env: Env, parse: (v: unknown) => T | null, run: (v: T) => Promise<Response>): Promise<Response> {
+	if (request.headers.has('Origin') || !env.INTERNAL_SECRET) return apiError(404, 'not_found', 'Not found');
+	const body = await readCapped(request, MAX_INTERNAL_BYTES);
+	if (body === null || !(await verifyInternal(env.INTERNAL_SECRET, request.headers.get(INTERNAL_SIG_HEADER), body, Date.now()))) {
+		return apiError(401, 'unauthorized', 'Bad signature');
+	}
+	let value: T | null = null;
+	try {
+		value = parse(JSON.parse(body));
+	} catch {
+		// Falls through to 400.
+	}
+	return value === null ? apiError(400, 'bad_request', 'Invalid request body') : run(value);
+}
+
 type Handler = (request: Request, env: Env) => Promise<Response> | Response;
 
 const ROUTES: Record<string, { method: 'GET' | 'POST'; handler: Handler }> = {
 	[API.health]: {
 		method: 'GET',
-		handler: async (_request, env) => json({ ok: true, protocol: PROTOCOL_VERSION, dataHash: DATA_HASH, multiplayer: await multiplayerOpen(env.DB) } satisfies HealthResponse)
+		handler: async (_request, env) => {
+			const settings = await readSettings(env.DB);
+			return json({
+				ok: true,
+				protocol: PROTOCOL_VERSION,
+				dataHash: DATA_HASH,
+				multiplayer: settings.open,
+				matchBackend: effectiveBackend(settings.backend, env)
+			} satisfies HealthResponse);
+		}
 	},
 	[API.guest]: { method: 'POST', handler: guest },
 	[API.profile]: { method: 'GET', handler: profile },
 	[API.name]: { method: 'POST', handler: rename },
 	[API.buy]: { method: 'POST', handler: (r, e) => shop(r, e, 'buy') },
 	[API.equip]: { method: 'POST', handler: (r, e) => shop(r, e, 'equip') },
-	[API.quickplay]: { method: 'POST', handler: quickplay }
+	[API.quickplay]: { method: 'POST', handler: quickplay },
+	[API.internalGrant]: { method: 'POST', handler: (r, e) => internal(r, e, parseGrant, async (g) => json(await grantReward(e.DB, g, Date.now()))) },
+	[API.internalMatch]: {
+		method: 'POST',
+		handler: (r, e) =>
+			internal(r, e, parseSummary, async (m) => {
+				await recordMatch(e.DB, m);
+				return json({ ok: true });
+			})
+	}
 };
 
 async function route(request: Request, env: Env): Promise<Response> {

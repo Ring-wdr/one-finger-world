@@ -14,7 +14,7 @@ describe('GET /api/health', () => {
 	it('reports the protocol version, data hash and whether online play is open', async () => {
 		const res = await exports.default.fetch('http://test/api/health');
 		expect(res.status).toBe(200);
-		expect(await res.json<HealthResponse>()).toEqual({ ok: true, protocol: PROTOCOL_VERSION, dataHash: DATA_HASH, multiplayer: true });
+		expect(await res.json<HealthResponse>()).toEqual({ ok: true, protocol: PROTOCOL_VERSION, dataHash: DATA_HASH, multiplayer: true, matchBackend: 'do' });
 	});
 });
 
