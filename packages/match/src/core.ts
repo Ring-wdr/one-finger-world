@@ -548,6 +548,11 @@ export class MatchCore {
 		this.host.save(meta, null);
 	}
 
+	/** A planned restart (the standalone server's SIGTERM): checkpoint the current tick so the restore resumes here. */
+	checkpointNow(): void {
+		if (this.meta.state === 'running' && this._world && !this.cleaned) this.checkpoint();
+	}
+
 	private checkpoint(): void {
 		if (this.awaitingCheckpoint) {
 			this.awaitingCheckpoint = false;
