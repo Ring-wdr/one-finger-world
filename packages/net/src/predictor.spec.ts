@@ -192,3 +192,64 @@ describe('Predictor corrections', () => {
 		expect(p.state!.pos.x).toBe(1);
 	});
 });
+
+describe('Predictor display between local ticks', () => {
+	const { stats } = setup();
+	const right = (seq: number): InputFrame => ({ ...emptyFrame(seq), move: { x: 1, y: 0 }, run: true });
+	const start = (): MotionState => {
+		const { f } = setup();
+		const m = motionFromFighter(f);
+		m.pos = { x: 0, y: 0 };
+		return m;
+	};
+
+	it('moves through the latest tick with alpha instead of jumping a whole tick', () => {
+		const p = new Predictor();
+		p.reset(start());
+		p.push(right(1), stats);
+		const end = p.state!.pos.x;
+		expect(end).toBeGreaterThan(0);
+		expect(p.displayPos(0, 0).x).toBeCloseTo(0, 12);
+		expect(p.displayPos(0, 0.5).x).toBeCloseTo(end / 2, 12);
+		expect(p.displayPos(0, 1).x).toBeCloseTo(end, 12);
+		p.push(right(2), stats);
+		expect(p.displayPos(0, 0).x).toBeCloseTo(end, 12);
+	});
+
+	it('keeps a frame-by-frame steady pace at 60 fps', () => {
+		const p = new Predictor();
+		p.reset(start());
+		const xs: number[] = [];
+		let acc = 0;
+		let seq = 0;
+		for (let frame = 0; frame < 60; frame++) {
+			acc += 1000 / 60;
+			while (acc >= 50) {
+				acc -= 50;
+				p.push(right(++seq), stats);
+			}
+			xs.push(p.displayPos(1 / 60, acc / 50).x);
+		}
+		const steps = xs.slice(10).map((x, i) => x - xs[9 + i]);
+		const min = Math.min(...steps);
+		const max = Math.max(...steps);
+		expect(min).toBeGreaterThan(0);
+		expect(max / min).toBeLessThan(1.01);
+	});
+
+	it('keeps the drawn spot continuous across a reconcile at the current alpha', () => {
+		const p = new Predictor();
+		p.reset(start());
+		for (let i = 1; i <= 4; i++) p.push(right(i), stats);
+		const shown = p.displayPos(0, 0.4);
+		// The server is a little ahead of what was predicted for frame 2.
+		const half = new Predictor();
+		half.reset(start());
+		for (let i = 1; i <= 2; i++) half.push(right(i), stats);
+		const server = clone(half.state!);
+		server.pos.x += 0.2;
+		p.reconcile(server, 2, stats);
+		expect(p.displayPos(0, 0.4).x).toBeCloseTo(shown.x, 12);
+		expect(p.displayPos(10, 0.4).x).toBeCloseTo(shown.x + 0.2, 6);
+	});
+});

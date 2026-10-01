@@ -242,7 +242,7 @@ export class OnlineMatch {
 		const sample = this.buffer.sample(renderTick);
 		if (!sample) return null;
 		const motion = this.predictor.state;
-		const displayPos = this.predictor.displayPos(dtMs / 1000);
+		const displayPos = this.predictor.displayPos(dtMs / 1000, this.accMs / this.tickMs());
 		const own = this.selfState && motion ? { self: this.selfState, build: this.selfMsg, motion, displayPos } : null;
 		const { world, prev, alpha } = this.builder.build(sample, this._selfId, own);
 		const find = (id: number | null) => (id === null ? undefined : world.fighters.find((f) => f.id === id));
