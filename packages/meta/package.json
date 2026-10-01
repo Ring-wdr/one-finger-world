@@ -1,0 +1,13 @@
+{
+	"name": "@ofa/meta",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Meta-progression rules shared by client and server: profile, rune shop, match rewards, nicknames.",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@ofa/sim": "workspace:*"
+	}
+}

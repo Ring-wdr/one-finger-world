@@ -9,6 +9,8 @@
 		"preview": "vite preview --host"
 	},
 	"dependencies": {
+		"@ofa/meta": "workspace:*",
+		"@ofa/net": "workspace:*",
 		"@ofa/sim": "workspace:*",
 		"@preact/signals": "^2.11.2",
 		"preact": "^10.29.8",

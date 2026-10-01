@@ -3,14 +3,16 @@
  * the Game implements StageHost and does the actual work; stages only decide *when*.
  */
 
-export type StageId = 'menu' | 'match' | 'result' | 'spectate' | 'tutorial';
+export type StageId = 'menu' | 'match' | 'queue' | 'online' | 'result' | 'spectate' | 'tutorial';
 
 /** Allowed transitions. Anything else is a bug (warned in dev, ignored otherwise). */
 export const TRANSITIONS: Readonly<Record<StageId, readonly StageId[]>> = {
-	menu: ['match', 'tutorial'],
+	menu: ['match', 'tutorial', 'queue'],
+	queue: ['online', 'menu'],
+	online: ['result'],
 	match: ['result'],
-	result: ['menu', 'match', 'spectate'],
-	spectate: ['result', 'match'],
+	result: ['menu', 'match', 'queue', 'spectate'],
+	spectate: ['result', 'match', 'queue'],
 	// Self-transition = restart; the tutorial-done panel can also jump straight into a match.
 	tutorial: ['menu', 'tutorial', 'match']
 };
@@ -91,6 +93,12 @@ export interface StageHost {
 	hudKey(key: string): boolean;
 	showMenu(): void;
 	startMatch(): void;
+	/** Begin matchmaking for an online match. */
+	startQueue(): void;
+	/** Leave the queue before the match started. */
+	cancelQueue(): void;
+	/** The online match has started: reset renderer and HUD. */
+	enterOnline(): void;
 	startTutorial(): void;
 	endTutorial(): void;
 	showResult(): void;
@@ -112,6 +120,27 @@ export function createStages(host: StageHost, go: (next: StageId) => void): Reco
 		match: {
 			acceptsInput: true,
 			enter: () => host.startMatch(),
+			frame: (dt) => {
+				host.simulate(dt);
+				host.present(dt, true);
+				if (host.playerDown() || host.worldOver()) go('result');
+			},
+			uiKey: (k) => host.hudKey(k)
+		},
+		// Matchmaking: no gameplay, the menu backdrop keeps rendering behind the queue screen.
+		queue: {
+			acceptsInput: false,
+			enter: () => host.startQueue(),
+			// Only leaving for the menu is a cancel; 'online' takes over the connection.
+			exit: (to) => {
+				if (to === 'menu') host.cancelQueue();
+			},
+			frame: (dt) => host.present(dt, false),
+			uiKey: ignoreKey
+		},
+		online: {
+			acceptsInput: true,
+			enter: () => host.enterOnline(),
 			frame: (dt) => {
 				host.simulate(dt);
 				host.present(dt, true);

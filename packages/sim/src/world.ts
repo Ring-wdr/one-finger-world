@@ -26,6 +26,7 @@ import { TAGS } from './tags';
 import {
 	DT,
 	MAP_RADIUS,
+	type BotBrain,
 	type Command,
 	type Fighter,
 	type World
@@ -43,9 +44,18 @@ const COLORS = [
 ];
 
 export const START_REROLLS = 2;
+/** An attack command stays queued this long, so a tap during a cooldown still lands. */
+export const ATTACK_BUFFER_TIME = 0.25;
+/** Walking (a short drag) moves at this fraction of the run speed. */
+export const WALK_SPEED_FACTOR = 0.55;
 /** Out-of-combat recovery: lets players reset between fights without potions. */
 const OOC_DELAY = 5;
 const OOC_REGEN_FRAC = 0.04;
+
+export interface HumanSeat {
+	name: string;
+	runes?: readonly string[];
+}
 
 export interface WorldOptions {
 	seed: number;
@@ -55,11 +65,23 @@ export interface WorldOptions {
 	playerName?: string;
 	/** Rune loadout for the human player (bots play without runes). */
 	playerRunes?: readonly string[];
+	/** Human fighters, in this order, before the bots. Mutually exclusive with playerName. */
+	humans?: readonly HumanSeat[];
 	/** No spawns, zone, phases or win check — the caller scripts the world (tutorial). */
 	sandbox?: boolean;
 }
 
-export function createWorld(opts: WorldOptions): { world: World; playerId: number | null } {
+export function createWorld(opts: WorldOptions): {
+	world: World;
+	playerId: number | null;
+	humanIds: number[];
+} {
+	if (opts.humans && opts.playerName !== undefined) {
+		throw new TypeError('createWorld: humans and playerName are mutually exclusive');
+	}
+	if (opts.humans && opts.humans.length > opts.fighters) {
+		throw new RangeError('createWorld: more humans than fighters');
+	}
 	const rng = new Rng(opts.seed);
 	const world: World = {
 		seed: opts.seed,
@@ -88,24 +110,30 @@ export function createWorld(opts: WorldOptions): { world: World; playerId: numbe
 	const names = rng.shuffle([...BOT_NAMES]);
 	const offset = rng.range(0, Math.PI * 2);
 	let playerId: number | null = null;
+	const humanIds: number[] = [];
+	const seats = opts.humans ?? [];
 	for (let i = 0; i < opts.fighters; i++) {
+		const seat = seats[i];
 		const isPlayer = i === 0 && opts.playerName !== undefined;
 		const angle = offset + (i / opts.fighters) * Math.PI * 2;
 		const pos = opts.sandbox ? { x: 0, y: 0 } : fromAngle(angle, 100 + rng.range(-6, 6));
 		const f = spawnFighter(world, {
-			name: isPlayer ? opts.playerName! : names[i % names.length],
+			name: seat ? seat.name : isPlayer ? opts.playerName! : names[i % names.length],
+			// A legacy player is white; seated humans keep a palette colour so every client sees its own marker.
 			color: isPlayer ? '#ffffff' : COLORS[i % COLORS.length],
 			pos,
-			bot: !isPlayer,
-			runes: isPlayer ? opts.playerRunes : undefined
+			bot: !isPlayer && !seat,
+			runes: seat ? seat.runes : isPlayer ? opts.playerRunes : undefined
 		});
 		if (isPlayer) playerId = f.id;
+		if (seat) humanIds.push(f.id);
 	}
+	if (opts.humans) playerId = humanIds[0] ?? null;
 
 	reindex(world);
 	// Seed the map so the first seconds aren't empty.
 	if (world.rules.spawnMonsters) for (let i = 0; i < 60; i++) spawnMonsters(world, true);
-	return { world, playerId };
+	return { world, playerId, humanIds };
 }
 
 export interface SpawnFighterOptions {
@@ -115,6 +143,37 @@ export interface SpawnFighterOptions {
 	bot: boolean;
 	aggressive?: boolean;
 	runes?: readonly string[];
+}
+
+/** A fresh bot brain; draws from `rng` in the same order spawnFighter always has. */
+export function newBotBrain(rng: Rng, aggressive = false): BotBrain {
+	return {
+		prefTags: rng.shuffle([...TAGS]).slice(0, 2),
+		risk: rng.next(),
+		thinkTimer: rng.next() * 0.3,
+		targetId: null,
+		goal: null,
+		goalTimer: 0,
+		mode: 'roam',
+		aggressive
+	};
+}
+
+/** Hands a living fighter to the AI (on) or back to its human (off). No-op for missing/dead fighters or when already in that state. */
+export function setBotControl(world: World, fighterId: number, on: boolean) {
+	const f = world.fighters.find((x) => x.id === fighterId);
+	if (!f || !f.alive || (f.bot !== null) === on) return;
+	if (on) {
+		f.bot = newBotBrain(world.rng);
+		// Decide on the very next tick instead of standing idle for up to 0.3s.
+		f.bot.thinkTimer = 0;
+	} else {
+		// Drop whatever the AI queued so the human starts from fresh input.
+		f.bot = null;
+		f.moveDir = null;
+		f.running = false;
+		f.attackQueued = 0;
+	}
 }
 
 export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
@@ -128,18 +187,7 @@ export function spawnFighter(world: World, o: SpawnFighterOptions): Fighter {
 		id,
 		name: o.name,
 		color: o.color,
-		bot: o.bot
-			? {
-					prefTags: rng.shuffle([...TAGS]).slice(0, 2),
-					risk: rng.next(),
-					thinkTimer: rng.next() * 0.3,
-					targetId: null,
-					goal: null,
-					goalTimer: 0,
-					mode: 'roam',
-					aggressive: o.aggressive ?? false
-				}
-			: null,
+		bot: o.bot ? newBotBrain(rng, o.aggressive) : null,
 		nav: newNav(id, pos),
 		pos,
 		radius: 0.7,
@@ -192,7 +240,7 @@ export function applyCommand(world: World, f: Fighter, cmd: Command) {
 			f.running = cmd.run;
 			return;
 		case 'attack':
-			f.attackQueued = 0.25;
+			f.attackQueued = ATTACK_BUFFER_TIME;
 			return;
 		case 'dash':
 			startDash(world, f, cmd.dir, cmd.touch === true);
@@ -265,7 +313,7 @@ function updateFighter(world: World, f: Fighter) {
 		updateDash(world, f);
 	} else {
 		if (f.moveDir && f.rootTime <= 0) {
-			const speed = s.moveSpeed * (f.running ? 1 : 0.55);
+			const speed = s.moveSpeed * (f.running ? 1 : WALK_SPEED_FACTOR);
 			// Everyone (the player too) slides along obstacles; only AI steers around them.
 			f.pos = moveWithCollision(f.pos, scale(f.moveDir, speed * DT), f.radius);
 			f.facing = copy(f.moveDir);

@@ -18,5 +18,15 @@
 		"jsx": "react-jsx",
 		"jsxImportSource": "preact"
 	},
-	"include": ["packages/*/src", "packages/*/scripts", "apps/*/src", "apps/*/scripts", "apps/*/vite.config.ts", "vitest.config.ts"]
+	"include": [
+		"packages/*/src",
+		"packages/*/scripts",
+		"apps/client/src",
+		"apps/client/scripts",
+		"apps/client/vite.config.ts",
+		"apps/server/scripts",
+		"apps/server/vitest.config.ts",
+		"scripts",
+		"vitest.config.ts"
+	]
 }

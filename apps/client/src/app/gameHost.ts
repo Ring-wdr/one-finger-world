@@ -65,7 +65,7 @@ export function cancelLoading() {
 export const gameActions: GameActions = {
 	go(next) {
 		if (game) game.go(next);
-		else if ((next === 'match' || next === 'tutorial') && !loading.value) void start(next);
+		else if ((next === 'match' || next === 'tutorial' || next === 'queue') && !loading.value) void start(next);
 	},
 	restart: () => game?.restart(),
 	spectateNext: () => game?.spectateNext()

@@ -1,28 +1,59 @@
+import { useState } from 'preact/hooks';
 import { getRune, RUNE_SLOT_INFO, RUNE_SLOTS } from '@ofa/sim';
+import { checkMultiplayer, multiplayerOpen, onlineAvailable, playerName } from '../../app/online';
 import { sfx } from '../../app/sound';
 import { menuView, profile, type GameActions, type MenuView } from '../../app/store';
 import { Coins } from './common';
 
 export function MainMenu({ game }: { game: GameActions }) {
 	const p = profile.value;
+	const [notice, setNotice] = useState<string | null>(null);
+	const [checking, setChecking] = useState(false);
 	const open = (v: MenuView) => {
 		sfx.play('ui');
 		menuView.value = v;
+	};
+	// The switch may have flipped since the page loaded: ask the server before queueing.
+	const playOnline = async () => {
+		if (checking) return;
+		setChecking(true);
+		const closed = await checkMultiplayer();
+		setChecking(false);
+		if (closed === null) game.go('queue');
+		else setNotice(closed);
 	};
 	return (
 		<div class="screen center">
 			<div class="panel menu-panel">
 				<div class="menu-top">
 					<Coins />
+					{onlineAvailable.value && <span class="player-name">{playerName.value}</span>}
 					{p.best > 0 && <span class="best">최고 점수 {p.best.toLocaleString()}</span>}
 				</div>
 				<h1>One Finger Royale</h1>
 				<p class="sub">한 손가락 3D 육성 배틀로얄 · 봇 11명</p>
 
-				<button class="btn big primary play" onClick={() => game.go('match')}>
-					⚔ 본 게임
-					<small>순위·처치·레벨에 따라 코인 획득</small>
-				</button>
+				{onlineAvailable.value ? (
+					<>
+						<button
+							class={`btn big primary play ${multiplayerOpen.value ? '' : 'closed'}`}
+							disabled={checking}
+							onClick={() => void playOnline()}
+						>
+							⚔ 온라인 매치
+							<small>{multiplayerOpen.value ? '전 세계 플레이어와 12인 배틀로얄 · 빈자리는 봇' : '지금은 닫혀 있어요'}</small>
+						</button>
+						<button class="btn big" onClick={() => game.go('match')}>
+							🤖 연습 매치
+							<small>봇 11명과 연습 · 코인 없음</small>
+						</button>
+					</>
+				) : (
+					<button class="btn big primary play" onClick={() => game.go('match')}>
+						⚔ 본 게임
+						<small>순위·처치·레벨에 따라 코인 획득</small>
+					</button>
+				)}
 				<div class="loadout" onClick={() => open('shop')}>
 					{RUNE_SLOTS.map((slot) => {
 						const id = p.equipped[slot];
@@ -68,6 +99,19 @@ export function MainMenu({ game }: { game: GameActions }) {
 					<p class="keys">키보드: WASD 이동 · Space 공격 · Shift 대시 · E 드래프트 · 1/2/3 선택 · R 리롤 · B 빌드</p>
 				</details>
 			</div>
+			{notice && (
+				<div class="modal" role="dialog" aria-modal="true" onClick={() => setNotice(null)}>
+					<div class="panel" onClick={(e) => e.stopPropagation()}>
+						<h2>온라인 매치</h2>
+						<p class="sub">{notice}</p>
+						<div class="row">
+							<button class="btn primary" onClick={() => setNotice(null)}>
+								확인
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }

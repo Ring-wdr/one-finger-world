@@ -1,0 +1,39 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "one-finger-royale",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-09-25",
+	// Workers Logs: match summaries are structured JSON (docs/multiplayer-server-design.md §14).
+	"observability": { "enabled": true },
+	// The Vite build of apps/client. Only /api/* runs the Worker; everything else is a free asset hit.
+	"assets": {
+		"directory": "../client/dist",
+		"run_worker_first": ["/api/*"],
+		"not_found_handling": "single-page-application"
+	},
+	"durable_objects": {
+		"bindings": [
+			{ "name": "MATCH", "class_name": "MatchRoom" },
+			{ "name": "LOBBY", "class_name": "Lobby" }
+		]
+	},
+	"exports": {
+		"MatchRoom": { "type": "durable-object", "storage": "sqlite" },
+		"Lobby": { "type": "durable-object", "storage": "sqlite" }
+	},
+	// No database_id: the first `wrangler deploy` creates the database and writes the id back here.
+	"d1_databases": [{ "binding": "DB", "database_name": "one-finger-royale", "migrations_dir": "migrations" }],
+	"ratelimits": [
+		{ "name": "GUEST_LIMITER", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
+		{ "name": "PLAY_LIMITER", "namespace_id": "1002", "simple": { "limit": 20, "period": 60 } }
+	],
+	"vars": {
+		// Where new match rooms and the lobby are placed: Japan/Korea.
+		"LOCATION_HINT": "apac-ne",
+		// Extra origins (comma-separated) allowed to call the API cross-origin, e.g. the GitHub Pages build.
+		"ALLOWED_ORIGINS": "https://ring-wdr.github.io",
+		// "1" enables debug RPCs for integration tests only.
+		"TEST_HOOKS": "0"
+	},
+	"secrets": { "required": ["AUTH_SECRET"] }
+}

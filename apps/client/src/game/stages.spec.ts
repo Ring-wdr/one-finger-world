@@ -40,6 +40,13 @@ class FakeHost implements StageHost {
 	endTutorial = () => void this.log.push('endTutorial');
 	showResult = () => void this.log.push('showResult');
 	showSpectate = () => void this.log.push('showSpectate');
+	startQueue = () => {
+		this.dead = false;
+		this.over = false;
+		this.log.push('startQueue');
+	};
+	cancelQueue = () => void this.log.push('cancelQueue');
+	enterOnline = () => void this.log.push('enterOnline');
 }
 
 function game() {
@@ -209,5 +216,68 @@ describe('game stages', () => {
 		host.log.length = 0;
 		stages.go('menu');
 		expect(host.log).toEqual(['endTutorial', 'showMenu']);
+	});
+});
+
+describe('online stages', () => {
+	it('queue → online → result, and the result offers menu, queue and spectate', () => {
+		const { host, stages } = game();
+		expect(stages.go('queue')).toBe(true);
+		expect(stages.acceptsInput).toBe(false);
+		expect(stages.go('online')).toBe(true);
+		expect(stages.acceptsInput).toBe(true);
+		host.dead = true;
+		stages.frame(0.016);
+		expect(stages.id).toBe('result');
+		for (const to of ['menu', 'queue', 'spectate'] as const) expect(stages.can(to), to).toBe(true);
+		expect(stages.can('online')).toBe(false);
+	});
+
+	it('the queue only presents the backdrop and does not simulate', () => {
+		const { host, stages } = game();
+		stages.go('queue');
+		host.log.length = 0;
+		stages.frame(0.016);
+		expect(host.log).toEqual(['present']);
+	});
+
+	it('cancels the queue when leaving for the menu, not when the match starts', () => {
+		const { host, stages } = game();
+		stages.go('queue');
+		stages.go('menu');
+		expect(host.log.filter((l) => l === 'cancelQueue')).toHaveLength(1);
+
+		host.log.length = 0;
+		stages.go('queue');
+		stages.go('online');
+		expect(host.log).toEqual(['startQueue', 'enterOnline']);
+	});
+
+	it('online simulates and presents with the HUD; ends on death or when the match is over', () => {
+		const { host, stages } = game();
+		stages.go('queue');
+		stages.go('online');
+		host.log.length = 0;
+		stages.frame(0.016);
+		expect(host.log).toEqual(['simulate', 'present+hud']);
+		expect(stages.id).toBe('online');
+		host.over = true;
+		stages.frame(0.016);
+		expect(stages.id).toBe('result');
+	});
+
+	it('online routes UI keys to the HUD', () => {
+		const { host, stages } = game();
+		stages.go('queue');
+		stages.go('online');
+		expect(stages.uiKey('e')).toBe(true);
+		expect(host.keys).toEqual(['e']);
+	});
+
+	it('menu cannot jump into online or the result, and spectate can requeue', () => {
+		const { stages } = game();
+		expect(stages.can('online')).toBe(false);
+		expect(TRANSITIONS.spectate).toContain('queue');
+		expect(TRANSITIONS.queue).toEqual(['online', 'menu']);
 	});
 });

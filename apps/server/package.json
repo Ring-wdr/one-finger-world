@@ -1,0 +1,24 @@
+{
+	"name": "@ofa/server",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Cloudflare Worker: HTTP API, matchmaking lobby and authoritative match rooms (Durable Objects).",
+	"scripts": {
+		"dev": "wrangler dev",
+		"deploy": "wrangler deploy",
+		"types": "wrangler types --include-runtime=false --strict-vars=false",
+		"db:migrate:local": "wrangler d1 migrations apply DB --local",
+		"db:migrate:remote": "wrangler d1 migrations apply DB --remote"
+	},
+	"dependencies": {
+		"@ofa/meta": "workspace:*",
+		"@ofa/net": "workspace:*",
+		"@ofa/sim": "workspace:*"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-plugin": "^1.3.2",
+		"@cloudflare/workers-types": "^5.20260929.1",
+		"wrangler": "^4.143.1"
+	}
+}

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'preact/hooks';
 import { RUNE_SLOT_INFO, RUNE_SLOTS, RUNES, type RuneDef } from '@ofa/sim';
 import { sfx } from '../../app/sound';
-import { menuView, profile } from '../../app/store';
-import { buyRune, toggleRune } from '../../meta/profile';
+import { buyRuneOnline, requestBusy, toggleRuneOnline } from '../../app/online';
+import { menuView, profile, profileSource } from '../../app/store';
+import { buyRune, toggleRune } from '@ofa/meta';
 import { modText, Page } from './common';
 
 function runeEffect(r: RuneDef) {
@@ -20,7 +21,21 @@ export function ShopScreen() {
 		return () => clearTimeout(t);
 	}, [flash]);
 
+	const server = profileSource.value === 'server';
+	const busy = requestBusy.value;
+
+	const actOnline = async (r: RuneDef) => {
+		const owned = p.owned.includes(r.id);
+		const error = await (owned ? toggleRuneOnline(r.id) : buyRuneOnline(r.id));
+		if (error === null) sfx.play('ui');
+		setFlash(error ?? (owned ? null : `${r.name} 구매 완료`));
+	};
+
 	const act = (r: RuneDef) => {
+		if (server) {
+			void actOnline(r);
+			return;
+		}
 		if (!p.owned.includes(r.id)) {
 			const next = buyRune(p, r.id);
 			if (typeof next === 'string') {
@@ -58,6 +73,7 @@ export function ShopScreen() {
 								<button
 									key={r.id}
 									class={`rune ${owned ? 'owned' : ''} ${on ? 'on' : ''} ${!owned && !affordable ? 'poor' : ''}`}
+									disabled={busy}
 									onClick={() => act(r)}
 								>
 									<b>{r.name}</b>
