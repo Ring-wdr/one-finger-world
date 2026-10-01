@@ -104,7 +104,7 @@ docs/multiplayer-server-design.md   이 문서
 
 코드는 두 층입니다.
 
-- `apps/server/src/match/core.ts`의 `MatchCore`: Cloudflare API를 모르는 순수 상태 기계. 시간·전송·저장·보상 지급은 `MatchHost` 인터페이스(`apps/server/src/match/types.ts`)로 주입받습니다. Node Vitest로 테스트합니다.
+- `packages/match/src/core.ts`의 `MatchCore`: Cloudflare API를 모르는 순수 상태 기계. 시간·전송·저장·보상 지급은 `MatchHost` 인터페이스(`packages/match/src/types.ts`)로 주입받습니다. Node Vitest로 테스트합니다.
 - `apps/server/src/match/room.ts`의 `MatchRoom extends DurableObject`: 소켓·타이머·알람·저장소·D1을 `MatchHost`로 연결하는 얇은 껍데기. workerd 통합 테스트로 확인합니다.
 
 ### 5.1 상태 기계
@@ -204,7 +204,7 @@ DO는 알람을 하나만 가질 수 있으므로 `MatchCore`가 다음 마감 �
 
 알람은 최소 1회 실행을 보장하지만 여러 번 올 수 있으므로 모든 처리는 멱등입니다(`rules`의 "Make alarm handlers idempotent").
 
-### 5.12 타이밍 상수 (`apps/server/src/match/types.ts`)
+### 5.12 타이밍 상수 (`packages/match/src/types.ts`)
 
 | 상수 | 값 |
 | --- | --- |

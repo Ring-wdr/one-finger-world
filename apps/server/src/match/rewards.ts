@@ -1,4 +1,4 @@
-import type { MatchSummary, RewardGrant, RewardOutcome } from './types';
+import type { MatchSummary, RewardGrant, RewardOutcome } from '@ofa/match';
 
 interface Balance {
 	coins: number;

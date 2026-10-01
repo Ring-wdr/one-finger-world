@@ -1,0 +1,15 @@
+{
+	"name": "@ofa/match",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"description": "Authoritative match state machine, tick loop, message budget and signed tokens. Runtime-agnostic: hosted by the Durable Object and the standalone match server.",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@ofa/meta": "workspace:*",
+		"@ofa/net": "workspace:*",
+		"@ofa/sim": "workspace:*"
+	}
+}

@@ -1,13 +1,8 @@
 import { DurableObject } from 'cloudflare:workers';
-import { Close, PING, PONG, TICK_MS } from '@ofa/net';
+import { MatchCore, MessageBudget, SEAT_HEADER, TickLoop, decodeSeatHeader, type ConnId, type MatchHost, type MatchMeta } from '@ofa/match';
+import { Close, PING, PONG } from '@ofa/net';
 import type { WorldCheckpoint } from '@ofa/sim';
-import { MatchCore } from './core';
 import { grantReward, recordMatch } from './rewards';
-import { MAX_CATCHUP_TICKS, SEAT_HEADER, decodeSeatHeader, type ConnId, type MatchHost, type MatchMeta } from './types';
-
-/** Per-connection message budget (§10.2 Flood): sustained rate and burst, e.g. frames queued during a stall. */
-const MSG_PER_SECOND = 40;
-const MSG_BURST = 100;
 
 interface Attachment {
 	conn: ConnId;
@@ -18,9 +13,8 @@ interface Attachment {
 export class MatchRoom extends DurableObject<Env> {
 	private core!: MatchCore;
 	private readonly sockets = new Map<ConnId, WebSocket>();
-	private readonly budgets = new Map<ConnId, { tokens: number; at: number }>();
-	private timer: ReturnType<typeof setTimeout> | null = null;
-	private nextTickAt = 0;
+	private readonly budget = new MessageBudget<ConnId>();
+	private loop!: TickLoop;
 	private coloLogged = false;
 
 	constructor(ctx: DurableObjectState, env: Env) {
@@ -30,6 +24,7 @@ export class MatchRoom extends DurableObject<Env> {
 			const [meta, checkpoint] = await Promise.all([ctx.storage.get<MatchMeta>('meta'), ctx.storage.get<WorldCheckpoint>('checkpoint')]);
 			// The match id is the room's own id (64 hex, MATCH_ID_PATTERN).
 			this.core = new MatchCore(this.host(), ctx.id.toString(), meta ? { meta, checkpoint: checkpoint ?? null } : undefined);
+			this.loop = new TickLoop(this.core, (err) => void this.crash(err));
 			for (const ws of ctx.getWebSockets()) {
 				const att = ws.deserializeAttachment() as Attachment | null;
 				if (!att) continue;
@@ -63,7 +58,7 @@ export class MatchRoom extends DurableObject<Env> {
 		const conn = this.connOf(ws);
 		if (!conn) return;
 		// Every message is billed (20 messages = 1 request), so one socket must not be able to burn the quota.
-		if (!this.withinBudget(conn)) {
+		if (!this.budget.take(conn, Date.now())) {
 			ws.close(Close.Flood, 'Too many messages');
 			this.dropSocket(ws);
 			return;
@@ -113,20 +108,10 @@ export class MatchRoom extends DurableObject<Env> {
 		return (ws.deserializeAttachment() as Attachment | null)?.conn ?? null;
 	}
 
-	/** Token bucket per connection: honest clients send 20 inputs/s plus a few control messages. */
-	private withinBudget(conn: ConnId): boolean {
-		const now = Date.now();
-		const b = this.budgets.get(conn) ?? { tokens: MSG_BURST, at: now };
-		b.tokens = Math.min(MSG_BURST, b.tokens + ((now - b.at) / 1000) * MSG_PER_SECOND) - 1;
-		b.at = now;
-		this.budgets.set(conn, b);
-		return b.tokens >= 0;
-	}
-
 	private dropSocket(ws: WebSocket): void {
 		const conn = this.connOf(ws);
 		if (!conn) return;
-		this.budgets.delete(conn);
+		this.budget.forget(conn);
 		this.sockets.delete(conn);
 		this.core.disconnect(conn);
 		this.sync();
@@ -136,34 +121,8 @@ export class MatchRoom extends DurableObject<Env> {
 
 	/** Runs the tick loop exactly while the match is running. */
 	private sync(): void {
-		const running = this.core.state === 'running';
-		if (running && this.timer === null) {
-			if (!this.coloLogged && this.core.world?.tick === 0) void this.logColo();
-			this.nextTickAt = Date.now() + TICK_MS;
-			this.timer = setTimeout(() => this.onTimer(), TICK_MS);
-		} else if (!running && this.timer !== null) {
-			clearTimeout(this.timer);
-			this.timer = null;
-		}
-	}
-
-	private onTimer(): void {
-		this.timer = null;
-		try {
-			const now = Date.now();
-			let n = 0;
-			while (now >= this.nextTickAt && n < MAX_CATCHUP_TICKS && this.core.state === 'running') {
-				this.core.tick();
-				this.nextTickAt += TICK_MS;
-				n += 1;
-			}
-			// More than the catch-up allowance behind: skip ahead instead of racing.
-			if (now >= this.nextTickAt) this.nextTickAt = now + TICK_MS;
-		} catch (err) {
-			void this.crash(err);
-			return;
-		}
-		if (this.core.state === 'running') this.timer = setTimeout(() => this.onTimer(), Math.max(0, this.nextTickAt - Date.now()));
+		if (!this.coloLogged && this.core.state === 'running' && this.core.world?.tick === 0) void this.logColo();
+		this.loop.sync();
 	}
 
 	/** A tick threw: remember it, then restart from the last checkpoint (fresh isolate state). */

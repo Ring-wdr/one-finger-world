@@ -1,7 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { API, DATA_HASH, PROTOCOL_VERSION, type GuestResponse, type ProfileResponse, type QuickplayResponse } from '@ofa/net';
-import { signToken } from '../src/auth';
+import { signToken } from '@ofa/match';
 import { Client } from './wsclient';
 
 /** The whole path a browser takes: HTTP API → lobby → ticket → Worker WebSocket route → room → D1. */

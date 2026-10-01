@@ -1,7 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { API, DATA_HASH, PROTOCOL_VERSION, type ApiErrorBody, type GuestResponse, type ProfileResponse, type QuickplayResponse } from '@ofa/net';
-import { signToken, verifyTicket } from '../src/auth';
+import { signToken, verifyTicket } from '@ofa/match';
 import { corsHeaders, originAllowed } from '../src/http';
 
 const ORIGIN = 'http://test';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { signToken, verifyGuest, verifyTicket, TICKET_TTL_MS, type GuestClaims, type TicketClaims } from './auth';
+import { signToken, verifyGuest, verifyTicket, TICKET_TTL_MS, type GuestClaims, type TicketClaims } from './tokens';
 
 const SECRET = 'unit-secret-0123456789abcdef0123456789';
 const guest: GuestClaims = { typ: 'guest', sub: 'u-1', iat: 1000 };

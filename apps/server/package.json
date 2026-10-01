@@ -12,6 +12,7 @@
 		"db:migrate:remote": "wrangler d1 migrations apply DB --remote"
 	},
 	"dependencies": {
+		"@ofa/match": "workspace:*",
 		"@ofa/meta": "workspace:*",
 		"@ofa/net": "workspace:*",
 		"@ofa/sim": "workspace:*"
