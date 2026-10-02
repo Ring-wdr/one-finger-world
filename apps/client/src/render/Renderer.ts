@@ -12,6 +12,7 @@ import {
 	type Vec2,
 	type World
 } from '@ofa/sim';
+import { AOI_NORTH_OFFSET, AOI_RADIUS } from '@ofa/net';
 import { AssetLibrary } from './assets/AssetLibrary';
 import type { ModelInstance } from './assets/ModelInstance';
 import type { AssetKey, InstanceOptions } from './assets/types';
@@ -23,12 +24,19 @@ import { ZoneWall } from './zoneWall';
 
 /** sim (x, y) lies on the ground plane; screen-up = sim +y = three −z. */
 const toThree = (p: Vec2, y = 0) => new THREE.Vector3(p.x, y, -p.y);
+/** toThree into an existing vector, for per-frame paths. */
+const setGround = (v: THREE.Vector3, p: Vec2, y = 0) => v.set(p.x, y, -p.y);
 /** Yaw that points a −Z-forward object along sim direction (dx, dy). */
 const facingAngle = (dx: number, dy: number) => Math.atan2(-dx, dy);
 /** Per-tick step below which a monster keeps its heading, so jitter can't flip it around. */
 const HEADING_MIN_STEP = 0.02;
 /** How fast a monster turns toward its heading (1/s, exponential). */
 const TURN_RATE = 14;
+/**
+ * Fighters turn faster, but still eased: facing arrives 20 times a second (and online, rounded to
+ * 256 steps), so setting it directly makes a turning fighter twitch between headings.
+ */
+const FIGHTER_TURN_RATE = 28;
 /** Signed shortest turn from angle `a` to angle `b`, in (−π, π]. */
 const angleDelta = (a: number, b: number) => {
 	const d = (b - a) % (Math.PI * 2);
@@ -51,6 +59,28 @@ const monsterKey = (m: Monster): AssetKey => `monster${m.tier}`;
  * cells, so most of the 240-unit map stays culled; smaller cells would cull more but cost draws.
  */
 const PROP_CELL = 40;
+
+/**
+ * Monster views exist only around what the camera shows: the same circle the server sends online
+ * (@ofa/net AOI), so offline the 100-odd monsters across the map don't each run an animation
+ * mixer every frame. A view is made inside VIEW_IN and dropped past VIEW_OUT, so units at the
+ * edge don't churn.
+ */
+const VIEW_IN = AOI_RADIUS;
+const VIEW_OUT = AOI_RADIUS + 6;
+/** Monsters this far from the focus animate on every LOD_EVERY-th frame (with the summed time). */
+const LOD_NEAR = 20;
+const LOD_EVERY = 3;
+
+/** Phones: cap the resolution lower and keep cheaper shadows. */
+const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+const MAX_PIXEL_RATIO = COARSE ? 1.5 : 2;
+const MIN_PIXEL_RATIO = 1;
+/** Dynamic resolution: every window, step the pixel ratio by STEP when frames run slow or fast. */
+const DPR_WINDOW = 2;
+const DPR_STEP = 0.25;
+const DPR_SLOW_MS = 22;
+const DPR_FAST_MS = 14;
 
 /** A corpse lies still this long after its death clip ends, then sinks out of sight. */
 const CORPSE_HOLD = 1.2;
@@ -81,11 +111,15 @@ interface FighterView extends ModelSlot {
 	/** Textured models don't take the fighter's colour, so it goes on the ground instead. */
 	teamRing: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
 	bar: Bar;
+	/** Drawn yaw, easing toward the fighter's facing. */
+	yaw: number;
 }
 
 interface MonsterView extends ModelSlot {
 	root: THREE.Group;
 	bar: Bar;
+	/** Time not yet given to the model's mixer (animation LOD). */
+	pendingDt: number;
 	/** Where it wants to face. */
 	heading: number;
 	/** Where it faces now, easing toward `heading`. */
@@ -121,6 +155,23 @@ export class Renderer {
 	private readonly focus = new THREE.Vector3();
 	private focusReady = false;
 	private cameraScale = 1;
+	private width = 1;
+	private height = 1;
+	private pixelRatio = Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO);
+	/** Frame time summed over the current dynamic-resolution window. */
+	private perfTime = 0;
+	private perfFrames = 0;
+	private frameIndex = 0;
+	/** Scratch for per-frame positions; nothing hot allocates. */
+	private readonly drawPos: Vec2 = { x: 0, y: 0 };
+	private readonly focusPos: Vec2 = { x: 0, y: 0 };
+	private readonly fxBack = new THREE.Vector3();
+	private readonly fxPos = new THREE.Vector3();
+	private readonly fxVel = new THREE.Vector3();
+	private readonly fxStep = new THREE.Vector3();
+	private readonly fxTarget = new THREE.Vector3();
+	/** Effect geometries by shape: every attack arc of the same width shares one buffer. */
+	private readonly fxGeo = new Map<string, THREE.BufferGeometry>();
 
 	private readonly fighters = new Map<number, FighterView>();
 	private readonly monsters = new Map<number, MonsterView>();
@@ -175,10 +226,10 @@ export class Renderer {
 		this.ready = this.assets.preload(onAssetProgress);
 
 		this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+		this.renderer.setPixelRatio(this.pixelRatio);
 		this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 		this.renderer.shadowMap.enabled = true;
-		this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+		this.renderer.shadowMap.type = COARSE ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 		this.scene.background = new THREE.Color(0x11151c);
 		this.scene.fog = new THREE.Fog(0x11151c, 60, 130);
 
@@ -252,7 +303,7 @@ export class Renderer {
 
 	private buildGround() {
 		const flat = (g: THREE.BufferGeometry) => g.rotateX(-Math.PI / 2);
-		const terrain = createTerrain();
+		const terrain = createTerrain(this.renderer);
 		terrain.receiveShadow = true;
 		this.scene.add(terrain);
 		// Exact ring boundaries: the terrain blends zones, these say where they really change.
@@ -332,12 +383,32 @@ export class Renderer {
 	}
 
 	resize(width: number, height: number) {
+		this.width = width;
+		this.height = height;
+		this.renderer.setPixelRatio(this.pixelRatio);
 		this.renderer.setSize(width, height, false);
 		this.camera.aspect = width / height;
 		// Portrait phones: pull back so roughly the same ground width stays visible.
 		this.cameraScale = Math.max(1, 0.95 / this.camera.aspect);
 		this.camera.updateProjectionMatrix();
 		this.particles.setViewport(height * this.renderer.getPixelRatio(), this.camera.fov);
+	}
+
+	/** Dynamic resolution: lower the pixel ratio while frames run slow, raise it back when they're quick. */
+	private adaptResolution(dt: number) {
+		this.perfTime += dt;
+		this.perfFrames++;
+		if (this.perfTime < DPR_WINDOW) return;
+		const ms = (this.perfTime / this.perfFrames) * 1000;
+		this.perfTime = 0;
+		this.perfFrames = 0;
+		const best = Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO);
+		let next = this.pixelRatio;
+		if (ms > DPR_SLOW_MS) next = Math.max(Math.min(MIN_PIXEL_RATIO, best), this.pixelRatio - DPR_STEP);
+		else if (ms < DPR_FAST_MS) next = Math.min(best, this.pixelRatio + DPR_STEP);
+		if (next === this.pixelRatio) return;
+		this.pixelRatio = next;
+		this.resize(this.width, this.height);
 	}
 
 	private makeBar(width: number, y: number): Bar {
@@ -366,10 +437,13 @@ export class Renderer {
 		bar.group.quaternion.copy(this.camera.quaternion);
 	}
 
-	/** A unit or loot model: these cast shadows (projectiles and effects don't). */
+	/**
+	 * A unit or loot model: these cast shadows (projectiles and effects don't). Tier-1 monsters are
+	 * the crowd (up to 55) and small, so they skip the shadow pass.
+	 */
 	private spawn(key: AssetKey, opts: InstanceOptions): ModelInstance {
 		const model = this.assets.instantiate(key, opts);
-		castShadows(model.object);
+		if (key !== 'monster1') castShadows(model.object);
 		return model;
 	}
 
@@ -408,7 +482,8 @@ export class Renderer {
 		spin.add(model.object);
 		root.add(spin, bubble, teamRing, bar.group);
 		this.scene.add(root);
-		v = { root, spin, model, tag: this.assets.tag('fighter', opts.variant), bubble, teamRing, bar };
+		const yaw = facingAngle(f.facing.x, f.facing.y);
+		v = { root, spin, model, tag: this.assets.tag('fighter', opts.variant), bubble, teamRing, bar, yaw };
 		this.fighters.set(f.id, v);
 		return v;
 	}
@@ -433,7 +508,7 @@ export class Renderer {
 		root.add(model.object, bar.group);
 		this.scene.add(root);
 		// Face the camera until it first moves or picks a target.
-		v = { root, model, tag: this.assets.tag(key), bar, heading: Math.PI, yaw: Math.PI };
+		v = { root, model, tag: this.assets.tag(key), bar, heading: Math.PI, yaw: Math.PI, pendingDt: 0 };
 		this.monsters.set(m.id, v);
 		return v;
 	}
@@ -460,7 +535,7 @@ export class Renderer {
 		);
 		beam.position.y = 3;
 		root.add(model.object, beam);
-		root.position.copy(toThree(pos));
+		setGround(root.position, pos);
 		this.scene.add(root);
 		v = { root, model, tag: this.assets.tag('pickup', opts.variant), beam };
 		this.pickups.set(id, v);
@@ -505,10 +580,22 @@ export class Renderer {
 	/** `alpha` interpolates between the previous and current sim tick. */
 	render(world: World, prev: Map<number, Vec2>, alpha: number, focusId: number | null, dt: number) {
 		this.clock += dt;
-		const lerpPos = (id: number, p: Vec2) => {
+		this.frameIndex++;
+		this.adaptResolution(dt);
+		/** Interpolated position, in a scratch object that the next call overwrites. */
+		const lerpPos = (id: number, p: Vec2): Vec2 => {
 			const a = prev.get(id);
-			return a ? { x: a.x + (p.x - a.x) * alpha, y: a.y + (p.y - a.y) * alpha } : p;
+			const out = this.drawPos;
+			if (!a) {
+				out.x = p.x;
+				out.y = p.y;
+			} else {
+				out.x = a.x + (p.x - a.x) * alpha;
+				out.y = a.y + (p.y - a.y) * alpha;
+			}
+			return out;
 		};
+		const turn = (yaw: number, to: number, rate: number) => to - angleDelta(yaw, to) * Math.exp(-rate * dt);
 		const hitK = (id: number) => {
 			const t = this.hitAt.get(id);
 			return t === undefined ? 0 : Math.max(0, 1 - (this.clock - t) / 0.15);
@@ -522,8 +609,9 @@ export class Renderer {
 			seen.add(f.id);
 			const v = this.fighterView(f, f.id === focusId);
 			const p = lerpPos(f.id, f.pos);
-			v.root.position.copy(toThree(p));
-			v.spin.rotation.y = facingAngle(f.facing.x, f.facing.y);
+			setGround(v.root.position, p);
+			v.yaw = turn(v.yaw, facingAngle(f.facing.x, f.facing.y), FIGHTER_TURN_RATE);
+			v.spin.rotation.y = v.yaw;
 			const k = hitK(f.id);
 			this.statusGlow(v.model, f, k * 0.6);
 			// Primitives squash to read as a dash; models have a clip for it.
@@ -532,7 +620,11 @@ export class Renderer {
 			v.model.update(dt);
 			v.bubble.visible = f.shield > 0.5;
 			this.setBar(v.bar, f.hp / f.maxHp, f.shield / f.maxHp);
-			if (f.id === focusId) focusPos = p;
+			if (f.id === focusId) {
+				this.focusPos.x = p.x;
+				this.focusPos.y = p.y;
+				focusPos = this.focusPos;
+			}
 		}
 		for (const [id, v] of this.fighters) {
 			if (seen.has(id)) continue;
@@ -540,13 +632,31 @@ export class Renderer {
 			this.fighters.delete(id);
 		}
 
-		// Monsters
+		// Camera: damped translation only. Placed before the monsters, which are culled around it.
+		if (focusPos) {
+			const target = setGround(this.fxTarget, focusPos);
+			if (!this.focusReady) {
+				this.focus.copy(target);
+				this.focusReady = true;
+			} else {
+				this.focus.lerp(target, 1 - Math.exp(-FOLLOW_RATE * dt));
+			}
+		}
+		this.camera.position.copy(this.focus).addScaledVector(CAMERA_OFFSET, this.cameraScale);
+		this.camera.lookAt(this.focus);
+		this.lighting.follow(this.focus);
+
+		// Monsters: views only around the view centre (see VIEW_IN), far ones animate at a lower rate.
+		const viewX = this.focus.x;
+		const viewY = -this.focus.z + AOI_NORTH_OFFSET;
 		seen.clear();
 		for (const m of world.monsters) {
+			const far = Math.hypot(m.pos.x - viewX, m.pos.y - viewY);
+			if (far > (this.monsters.has(m.id) ? VIEW_OUT : VIEW_IN)) continue;
 			seen.add(m.id);
 			const v = this.monsterView(m);
 			const p = lerpPos(m.id, m.pos);
-			v.root.position.copy(toThree(p));
+			setGround(v.root.position, p);
 			const was = prev.get(m.id);
 			const step = was === undefined ? 0 : Math.hypot(m.pos.x - was.x, m.pos.y - was.y);
 			const moving = step > 1e-4;
@@ -556,7 +666,7 @@ export class Renderer {
 			if (walking) v.heading = facingAngle(m.pos.x - was.x, m.pos.y - was.y);
 			else if (target) v.heading = facingAngle(target.pos.x - m.pos.x, target.pos.y - m.pos.y);
 			// Stepping from the heading keeps yaw within one turn of it instead of accumulating.
-			v.yaw = v.heading - angleDelta(v.yaw, v.heading) * Math.exp(-TURN_RATE * dt);
+			v.yaw = turn(v.yaw, v.heading, TURN_RATE);
 			const obj = v.model.object;
 			if (v.model.isFallback) {
 				// Floating, spinning gem.
@@ -569,7 +679,12 @@ export class Renderer {
 			obj.scale.setScalar(1 + k * 0.25);
 			this.statusGlow(v.model, m, k * 0.5);
 			v.model.setLoop(moving ? 'move' : 'idle');
-			v.model.update(dt);
+			v.pendingDt += dt;
+			const near = Math.hypot(m.pos.x - this.focus.x, m.pos.y + this.focus.z) < LOD_NEAR;
+			if (near || (this.frameIndex + m.id) % LOD_EVERY === 0) {
+				v.model.update(v.pendingDt);
+				v.pendingDt = 0;
+			}
 			v.bar.group.visible = m.hp < m.maxHp - 0.01;
 			this.setBar(v.bar, m.hp / m.maxHp, 0);
 		}
@@ -607,7 +722,7 @@ export class Renderer {
 				this.projectiles.set(pr.id, model);
 				if (pr.kind === 'fireball') this.fireballs.add(pr.id);
 			}
-			model.object.position.copy(toThree(lerpPos(pr.id, pr.pos), 1.1));
+			setGround(model.object.position, lerpPos(pr.id, pr.pos), 1.1);
 			model.object.rotation.y = facingAngle(pr.vel.x, pr.vel.y);
 			if (pr.kind === 'fireball') this.fireballFx(model.object, pr.id, pr.vel, dt);
 		}
@@ -651,7 +766,7 @@ export class Renderer {
 		}
 
 		this.playerMarker.visible = focusPos !== null && focusId !== null && world.fighters.some((f) => f.id === focusId && !f.bot);
-		if (focusPos) this.playerMarker.position.set(focusPos.x, 0.05, -focusPos.y);
+		if (focusPos) setGround(this.playerMarker.position, focusPos, 0.05);
 
 		// FX
 		this.fx = this.fx.filter((e) => {
@@ -660,7 +775,7 @@ export class Renderer {
 				this.scene.remove(e.obj);
 				e.obj.traverse((o) => {
 					if (o instanceof THREE.Mesh) {
-						o.geometry.dispose();
+						if (!o.geometry.userData.shared) o.geometry.dispose();
 						(o.material as THREE.Material).dispose();
 					} else if (o instanceof THREE.Sprite) {
 						o.material.dispose();
@@ -672,19 +787,6 @@ export class Renderer {
 			return true;
 		});
 
-		// Camera: damped translation only.
-		if (focusPos) {
-			const target = toThree(focusPos);
-			if (!this.focusReady) {
-				this.focus.copy(target);
-				this.focusReady = true;
-			} else {
-				this.focus.lerp(target, 1 - Math.exp(-FOLLOW_RATE * dt));
-			}
-		}
-		this.camera.position.copy(this.focus).addScaledVector(CAMERA_OFFSET, this.cameraScale);
-		this.camera.lookAt(this.focus);
-		this.lighting.follow(this.focus);
 
 		this.renderer.render(this.scene, this.camera);
 	}
@@ -699,17 +801,20 @@ export class Renderer {
 	/** Flicker, and shed embers behind it along its flight. */
 	private fireballFx(obj: THREE.Object3D, id: number, vel: Vec2, dt: number) {
 		obj.scale.setScalar(1 + Math.sin(this.clock * 38 + id) * 0.1);
-		const back = new THREE.Vector3(-vel.x, 0, vel.y).normalize();
-		const p = new THREE.Vector3();
-		const v = new THREE.Vector3();
+		const back = this.fxBack.set(-vel.x, 0, vel.y).normalize();
+		const p = this.fxPos;
+		const v = this.fxVel;
 		// ~150 embers a second, spread along the frame's travel so the trail stays continuous.
 		const count = Math.max(2, Math.round(dt * 150));
-		const step = new THREE.Vector3(vel.x, 0, -vel.y).multiplyScalar(dt / count);
+		const step = this.fxStep.set(vel.x, 0, -vel.y).multiplyScalar(dt / count);
 		for (let i = 0; i < count; i++) {
 			p.copy(obj.position)
 				.addScaledVector(step, -i)
 				.add(v.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.3));
-			v.copy(back).multiplyScalar(0.8 + Math.random() * 1.2).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.4, (Math.random() - 0.5) * 0.6));
+			v.copy(back).multiplyScalar(0.8 + Math.random() * 1.2);
+			v.x += (Math.random() - 0.5) * 0.6;
+			v.y += 0.4;
+			v.z += (Math.random() - 0.5) * 0.6;
 			this.particles.emit(p, v, 0.35 + Math.random() * 0.25, 0.6 + Math.random() * 0.45, FIRE[1 + (i % 3)]);
 		}
 	}
@@ -735,12 +840,32 @@ export class Renderer {
 		tick(0);
 	}
 
+	/** A geometry kept for the renderer's lifetime and shared by every effect of that shape. */
+	private sharedGeo(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeometry {
+		let g = this.fxGeo.get(key);
+		if (!g) {
+			g = make();
+			g.userData.shared = true;
+			this.fxGeo.set(key, g);
+		}
+		return g;
+	}
+
+	/**
+	 * A flat ring or arc around `at`. The geometry is a unit ring shared per (inner/outer, arc) and
+	 * scaled to `outer`; the arc is turned to `start` (sim angle) by the mesh's yaw.
+	 */
 	private groundRing(at: Vec2, inner: number, outer: number, color: number, start = 0, length = Math.PI * 2) {
+		const ratio = Math.round((inner / outer) * 100) / 100;
+		const arc = Math.round(length * 100) / 100;
+		const geo = this.sharedGeo(`ring:${ratio}:${arc}`, () => new THREE.RingGeometry(ratio, 1, 40, 1, 0, arc).rotateX(-Math.PI / 2));
 		const mesh = new THREE.Mesh(
-			new THREE.RingGeometry(inner, outer, 40, 1, start, length).rotateX(-Math.PI / 2),
+			geo,
 			new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide })
 		);
-		mesh.position.copy(toThree(at, 0.08));
+		mesh.scale.setScalar(outer);
+		mesh.rotation.y = start;
+		setGround(mesh.position, at, 0.08);
 		return mesh;
 	}
 
@@ -783,10 +908,11 @@ export class Renderer {
 					const dy = e.to.y - e.from.y;
 					const len = Math.hypot(dx, dy);
 					const mesh = new THREE.Mesh(
-						new THREE.PlaneGeometry(0.9, len).rotateX(-Math.PI / 2),
+						this.sharedGeo('dash', () => new THREE.PlaneGeometry(0.9, 1).rotateX(-Math.PI / 2)),
 						new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.5, depthWrite: false })
 					);
-					mesh.position.copy(toThree({ x: e.from.x + dx / 2, y: e.from.y + dy / 2 }, 0.1));
+					mesh.scale.z = Math.max(0.01, len);
+					mesh.position.set(e.from.x + dx / 2, 0.1, -(e.from.y + dy / 2));
 					mesh.rotation.y = facingAngle(dx, dy);
 					const mat = mesh.material;
 					this.addFx(mesh, 0.3, (k) => {
@@ -810,7 +936,7 @@ export class Renderer {
 					if (e.unit !== playerId) break;
 					const color = e.type === 'synergy' ? new THREE.Color(TAG_INFO[e.tag].color).getHex() : 0xffd54f;
 					const mesh = new THREE.Mesh(
-						new THREE.CylinderGeometry(1.2, 1.2, 4, 24, 1, true),
+						this.sharedGeo('levelUp', () => new THREE.CylinderGeometry(1.2, 1.2, 4, 24, 1, true)),
 						new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false })
 					);
 					const fighter = this.fighters.get(e.unit);
@@ -828,6 +954,8 @@ export class Renderer {
 
 	dispose() {
 		this.reset();
+		for (const g of this.fxGeo.values()) g.dispose();
+		this.fxGeo.clear();
 		this.particles.dispose();
 		this.glowTex.dispose();
 		this.zoneWall.dispose();

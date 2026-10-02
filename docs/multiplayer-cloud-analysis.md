@@ -121,6 +121,8 @@ three.js는 `Mesh.frustumCulled`(기본 true)로 카메라 밖 메시의 **드�
 
 8. **HUD** — 텍스트 diff, 미니맵 5 Hz(`Hud.ts:444-448`)로 이미 절제돼 있어 손댈 곳이 거의 없습니다.
 
+> **구현 상태 (2026-10-01, `work/net-jitter`):** 1번(몬스터 뷰를 `@ofa/net`의 AOI 원 `AOI_RADIUS`/`AOI_NORTH_OFFSET` 안에서만 생성, 6유닛 히스테리시스), 2번(포커스 20유닛 밖 몬스터는 3프레임마다 누적 dt로 믹서 갱신), 3번(지형을 2048² 텍스처에 한 번 굽고 셰이더는 샘플 1회 + 그레인 노이즈 1회), 4번 일부(티어1 몬스터 그림자 끔, 터치 기기는 `PCFShadowMap`), 5번(`setGround` 스크래치, 공격 링·대시·레벨업 지오메트리 공유), 6번(터치 기기 DPR 상한 1.5, 2초 평균 프레임이 22 ms 초과면 0.25씩 낮추고 14 ms 미만이면 복구)을 적용했습니다. 그래픽 프리셋 설정 UI(4번 나머지)와 2.3의 텍스처 WebP 재빌드는 남아 있습니다.
+
 ### 2.3 로딩·배포 관련(프로덕션 체감에 직접 영향)
 
 - `build-characters.ts`는 `textureCompress`를 쓰지 않아 텍스처가 PNG로 남습니다(매니페스트 주석의 `--texture-compress webp`와 다름). `@gltf-transform/functions`의 `textureCompress({ targetFormat: 'webp' })`를 추가하면 캐릭터 8개(2.6 MB)가 대략 절반으로 줄 것으로 예상됩니다. 각 파일이 같은 팩 아틀라스를 따로 품고 있으므로 텍스처를 외부 파일로 공유하는 것도 방법입니다.
